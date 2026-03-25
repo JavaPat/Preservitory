@@ -1,24 +1,17 @@
 package com.classic.preservitory.entity;
 
-import com.classic.preservitory.item.Item;
-import com.classic.preservitory.item.LootTable;
-
-import java.util.List;
-
 /**
- * Base class for all combat enemies.
+ * Base class for all client-rendered combat enemies.
  *
- * Tracks hitpoints, combat stats, and a respawn timer.
- * Subclasses provide a name, starting stats, a loot table, and rendering.
- *
- * Life-cycle:
- *   ALIVE → takeDamage() → hp reaches 0 → DEAD
- *   DEAD  → respawnTimer counts down → ALIVE (back at spawn position)
+ * The client stores only renderable server snapshot state: id, stats, HP,
+ * alive/dead status, and drawing behavior. Damage, respawn, loot, and AI are
+ * owned by the server.
  */
 public abstract class Enemy extends Entity {
 
     public enum State { ALIVE, DEAD }
 
+    private String id    = "";
     private final String name;
     private State        state;
 
@@ -30,21 +23,10 @@ public abstract class Enemy extends Entity {
     protected final int strengthLevel;
     protected final int defenceLevel;
 
-    // --- Respawn ---
-    private final double respawnTime;
-    private       double respawnTimer;
-
-    // Original spawn coordinates so the enemy returns here after death
-    private final double spawnX;
-    private final double spawnY;
-
-    private final LootTable lootTable;
-
     protected Enemy(String name,
                     double x, double y, int width, int height,
                     int maxHp,
-                    int attackLevel, int strengthLevel, int defenceLevel,
-                    double respawnTime) {
+                    int attackLevel, int strengthLevel, int defenceLevel) {
         super(x, y, width, height);
         this.name          = name;
         this.state         = State.ALIVE;
@@ -53,62 +35,6 @@ public abstract class Enemy extends Entity {
         this.attackLevel   = attackLevel;
         this.strengthLevel = strengthLevel;
         this.defenceLevel  = defenceLevel;
-        this.respawnTime   = respawnTime;
-        this.spawnX        = x;
-        this.spawnY        = y;
-
-        this.lootTable = new LootTable();
-        buildLootTable(this.lootTable);
-    }
-
-    /**
-     * Subclasses call table.addEntry() here to define their drops.
-     */
-    protected abstract void buildLootTable(LootTable table);
-
-    // -----------------------------------------------------------------------
-    //  Per-frame update
-    // -----------------------------------------------------------------------
-
-    /**
-     * Must be called every frame.
-     * Ticks the respawn counter and revives the enemy when it expires.
-     */
-    public void update(double deltaTime) {
-        if (state == State.DEAD) {
-            respawnTimer -= deltaTime;
-            if (respawnTimer <= 0) {
-                x     = spawnX;
-                y     = spawnY;
-                hp    = maxHp;
-                state = State.ALIVE;
-            }
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    //  Combat
-    // -----------------------------------------------------------------------
-
-    /**
-     * Apply incoming damage.
-     * Ignores the call if already dead.
-     */
-    public void takeDamage(int amount) {
-        if (state != State.ALIVE) return;
-        hp = Math.max(0, hp - amount);
-        if (hp == 0) {
-            state        = State.DEAD;
-            respawnTimer = respawnTime;
-        }
-    }
-
-    /**
-     * Roll and return the items dropped on this kill.
-     * Call once, right after the enemy's hp reaches 0.
-     */
-    public List<Item> rollLoot() {
-        return lootTable.rollLoot();
     }
 
     // -----------------------------------------------------------------------
@@ -132,6 +58,9 @@ public abstract class Enemy extends Entity {
     public boolean isAlive()          { return state == State.ALIVE; }
     public boolean isDead()           { return state == State.DEAD; }
 
+    public String  getId()            { return id; }
+    public void    setId(String id)   { this.id = id; }
+
     public String  getName()          { return name; }
     public int     getHp()            { return hp; }
     public int     getMaxHp()         { return maxHp; }
@@ -142,5 +71,15 @@ public abstract class Enemy extends Entity {
     /** Current HP as a 0.0–1.0 fraction. Used to draw a health bar. */
     public float getHpFraction() {
         return (float) hp / maxHp;
+    }
+
+    /**
+     * Sync HP from an authoritative server snapshot.
+     * Transitions state to ALIVE or DEAD based on the new value;
+     * no local respawn timer is started (the server owns that).
+     */
+    public void setHp(int newHp) {
+        this.hp = Math.max(0, newHp);
+        state = (this.hp > 0) ? State.ALIVE : State.DEAD;
     }
 }

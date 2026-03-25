@@ -5,6 +5,7 @@ import com.classic.preservitory.world.World;
 
 import java.awt.Point;
 import java.util.*;
+import java.util.function.BiPredicate;
 
 /**
  * Tile-grid A* pathfinding.
@@ -37,17 +38,21 @@ public class Pathfinding {
      * Find a path on the tile grid from {@code (startCol, startRow)} to
      * {@code (goalCol, goalRow)}.
      *
-     * @param startCol  starting tile column
-     * @param startRow  starting tile row
-     * @param goalCol   destination tile column
-     * @param goalRow   destination tile row
-     * @param world     used to query tile walkability
+     * @param startCol      starting tile column
+     * @param startRow      starting tile row
+     * @param goalCol       destination tile column
+     * @param goalRow       destination tile row
+     * @param world         used to query base tile walkability (rocks, bounds)
+     * @param extraBlocked  optional extra predicate — returns {@code true} when
+     *                      a tile (col, row) is additionally blocked (e.g. trees
+     *                      from ClientWorld).  Pass {@code null} to skip.
      * @return ordered list of pixel-space tile-centre waypoints, or empty if
      *         no path exists or start == goal
      */
     public static List<Point> findPath(int startCol, int startRow,
                                         int goalCol,  int goalRow,
-                                        World world) {
+                                        World world,
+                                        BiPredicate<Integer, Integer> extraBlocked) {
         int cols = world.getCols();
         int rows = world.getRows();
 
@@ -60,8 +65,8 @@ public class Pathfinding {
         }
 
         // If goal tile is blocked, reroute to the nearest walkable tile beside it
-        if (!world.isTileWalkable(goalCol, goalRow)) {
-            Point near = nearestWalkable(goalCol, goalRow, world);
+        if (!isWalkable(goalCol, goalRow, world, extraBlocked)) {
+            Point near = nearestWalkable(goalCol, goalRow, world, extraBlocked);
             if (near == null) return Collections.emptyList();
             goalCol = near.x;
             goalRow = near.y;
@@ -111,13 +116,13 @@ public class Pathfinding {
                 if (closed[nIdx]) continue;
 
                 // Only the exact goal tile may be unwalkable (to handle "stand next to" cases)
-                if (!world.isTileWalkable(nc, nr) && nIdx != goalIdx) continue;
+                if (!isWalkable(nc, nr, world, extraBlocked) && nIdx != goalIdx) continue;
 
                 // Prevent corner-cutting: both cardinal neighbours must be walkable
                 boolean diagonal = (DC[i] != 0 && DR[i] != 0);
                 if (diagonal) {
-                    if (!world.isTileWalkable(curCol + DC[i], curRow)
-                     || !world.isTileWalkable(curCol, curRow + DR[i])) continue;
+                    if (!isWalkable(curCol + DC[i], curRow, world, extraBlocked)
+                     || !isWalkable(curCol, curRow + DR[i], world, extraBlocked)) continue;
                 }
 
                 int moveCost = diagonal ? COST_DIAGONAL : COST_CARDINAL;
@@ -133,6 +138,17 @@ public class Pathfinding {
         }
 
         return Collections.emptyList(); // No path found
+    }
+
+    /**
+     * Convenience overload — no extra blocked predicate (rocks only).
+     * Kept for backwards compatibility with any call sites that don't need
+     * tree awareness.
+     */
+    public static List<Point> findPath(int startCol, int startRow,
+                                        int goalCol,  int goalRow,
+                                        World world) {
+        return findPath(startCol, startRow, goalCol, goalRow, world, null);
     }
 
     // -----------------------------------------------------------------------
@@ -187,10 +203,22 @@ public class Pathfinding {
     }
 
     /**
+     * Combined walkability check: base tile must be walkable AND the optional
+     * extra-blocked predicate must not flag the tile as blocked.
+     */
+    private static boolean isWalkable(int col, int row, World world,
+                                       BiPredicate<Integer, Integer> extraBlocked) {
+        if (!world.isTileWalkable(col, row)) return false;
+        if (extraBlocked != null && extraBlocked.test(col, row)) return false;
+        return true;
+    }
+
+    /**
      * Scan outward from (col, row) in a ring pattern until we find a walkable tile.
      * Returns null if nothing is found within radius 3.
      */
-    private static Point nearestWalkable(int col, int row, World world) {
+    private static Point nearestWalkable(int col, int row, World world,
+                                          BiPredicate<Integer, Integer> extraBlocked) {
         for (int r = 1; r <= 3; r++) {
             for (int dc = -r; dc <= r; dc++) {
                 for (int dr = -r; dr <= r; dr++) {
@@ -199,7 +227,7 @@ public class Pathfinding {
                     int nr = row + dr;
                     if (nc >= 0 && nc < world.getCols()
                      && nr >= 0 && nr < world.getRows()
-                     && world.isTileWalkable(nc, nr)) {
+                     && isWalkable(nc, nr, world, extraBlocked)) {
                         return new Point(nc, nr);
                     }
                 }

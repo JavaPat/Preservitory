@@ -1,14 +1,12 @@
 package com.classic.preservitory.system;
 
-import com.classic.preservitory.item.Inventory;
-import com.classic.preservitory.item.Item;
 import com.classic.preservitory.world.objects.Rock;
 
 /**
  * Manages the mining mini-loop, mirroring WoodcuttingSystem but for rocks.
  *
  * Each MINE_INTERVAL seconds, update() returns true.
- * The caller then calls grantReward() to award Ore and Mining XP.
+ * The caller then sends a mine request to the server.
  */
 public class MiningSystem {
 
@@ -61,26 +59,6 @@ public class MiningSystem {
             return true;
         }
         return false;
-    }
-
-    // -----------------------------------------------------------------------
-    //  Reward
-    // -----------------------------------------------------------------------
-
-    /**
-     * Apply the mine reward: XP + Ore + deplete the rock.
-     * Call immediately after update() returns true.
-     *
-     * @return true if ore was added to inventory; false if inventory was full.
-     */
-    public boolean grantReward(SkillSystem skillSystem, Inventory inventory) {
-        skillSystem.addXp("mining", XP_PER_MINE);
-        boolean oreAdded = inventory.addItem(new Item("Ore", true));
-        if (targetRock != null) {
-            targetRock.deplete();
-        }
-        stopMining();
-        return oreAdded;
     }
 
     // -----------------------------------------------------------------------

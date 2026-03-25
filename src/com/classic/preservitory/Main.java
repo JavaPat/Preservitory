@@ -1,8 +1,6 @@
 package com.classic.preservitory;
 
 import com.classic.preservitory.game.Game;
-import com.classic.preservitory.server.GameServer;
-
 import java.io.IOException;
 
 /**
@@ -21,13 +19,6 @@ import java.io.IOException;
 public class Main {
 
     public static void main(String[] args) throws IOException {
-        // "--server" flag: run headless server, no game window
-        if (args.length > 0 && "--server".equals(args[0])) {
-            System.out.println("Starting Preservitory server...");
-            new GameServer().start();   // blocks forever
-            return;
-        }
-
         // Default: launch the game client (connects to server automatically)
         Game game = new Game();
         game.start();

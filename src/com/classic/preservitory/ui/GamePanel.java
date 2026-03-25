@@ -1,34 +1,26 @@
 package com.classic.preservitory.ui;
 
+import com.classic.preservitory.client.world.ClientWorld;
 import com.classic.preservitory.entity.Animation;
 import com.classic.preservitory.entity.Enemy;
 import com.classic.preservitory.entity.Entity;
 import com.classic.preservitory.entity.NPC;
 import com.classic.preservitory.entity.Player;
 import com.classic.preservitory.entity.RemotePlayer;
-import com.classic.preservitory.entity.Skill;
 import com.classic.preservitory.network.ClientConnection;
 import com.classic.preservitory.game.GameLoop;
-import com.classic.preservitory.ui.ChatBox;
-import com.classic.preservitory.ui.FloatingText;
-import com.classic.preservitory.ui.RightPanel;
 import com.classic.preservitory.input.MouseHandler;
-import com.classic.preservitory.item.Item;
-import com.classic.preservitory.quest.Quest;
-import com.classic.preservitory.quest.QuestSystem;
 import com.classic.preservitory.system.CombatSystem;
 import com.classic.preservitory.system.DialogueSystem;
 import com.classic.preservitory.system.MiningSystem;
 import com.classic.preservitory.system.MovementSystem;
 import com.classic.preservitory.system.Pathfinding;
-import com.classic.preservitory.system.SaveSystem;
-import com.classic.preservitory.system.ShopSystem;
-import com.classic.preservitory.system.SkillSystem;
 import com.classic.preservitory.system.SoundSystem;
 import com.classic.preservitory.system.WoodcuttingSystem;
 import com.classic.preservitory.util.Constants;
 import com.classic.preservitory.util.IsoUtils;
 import com.classic.preservitory.world.World;
+import com.classic.preservitory.world.objects.Loot;
 import com.classic.preservitory.world.objects.Rock;
 import com.classic.preservitory.world.objects.Tree;
 
@@ -58,7 +50,6 @@ import java.util.Map;
  * === Game states ===
  *   PLAYING     — normal gameplay
  *   IN_DIALOGUE — NPC dialogue visible; movement blocked; click advances text
- *   IN_SHOP     — shop overlay visible; movement blocked
  *
  * === Click priority (PLAYING, viewport only) ===
  *   0. Panel click (cx ≥ PANEL_X)  → ignored
@@ -87,7 +78,7 @@ public class GamePanel extends JPanel {
     //  Game state
     // -----------------------------------------------------------------------
 
-    private enum GameState { PLAYING, IN_DIALOGUE, IN_SHOP }
+    private enum GameState { PLAYING, IN_DIALOGUE }
     private GameState gameState = GameState.PLAYING;
 
     // -----------------------------------------------------------------------
@@ -95,15 +86,6 @@ public class GamePanel extends JPanel {
     // -----------------------------------------------------------------------
 
     private static final int CHAT_H = 88;
-
-    // -----------------------------------------------------------------------
-    //  Shop overlay — centred inside the game viewport
-    // -----------------------------------------------------------------------
-
-    private static final int SHOP_W = 500;
-    private static final int SHOP_H = 360;
-    private static final int SHOP_X = (Constants.VIEWPORT_W - SHOP_W) / 2;
-    private static final int SHOP_Y = (Constants.SCREEN_HEIGHT - SHOP_H) / 2;
 
     // -----------------------------------------------------------------------
     //  Game objects
@@ -117,8 +99,6 @@ public class GamePanel extends JPanel {
     private final MiningSystem      miningSystem;
     private final CombatSystem      combatSystem;
     private final DialogueSystem    dialogueSystem;
-    private final QuestSystem       questSystem;
-    private final ShopSystem        shopSystem;
     private final SoundSystem       soundSystem;
     private final GameLoop          gameLoop;
 
@@ -139,6 +119,9 @@ public class GamePanel extends JPanel {
     /** Manages the TCP connection to the game server (no-op if offline). */
     private final ClientConnection clientConnection = new ClientConnection();
 
+    /** ✅ NEW: holds server-side synced world data */
+    private final ClientWorld clientWorld = new ClientWorld();
+
     /**
      * Live remote players keyed by their server-assigned ID.
      * Updated each frame from {@link ClientConnection#getRemotePlayers()}.
@@ -151,6 +134,7 @@ public class GamePanel extends JPanel {
     private Rock  activeRock;
     private Enemy activeEnemy;
     private NPC   activeNPC;
+    private Loot  activeLoot;
 
     // -----------------------------------------------------------------------
     //  Camera
@@ -171,6 +155,7 @@ public class GamePanel extends JPanel {
 
     /** All live floating-text labels (damage, XP, loot). */
     private final List<FloatingText> floatingTexts = new ArrayList<>();
+    private boolean deathHandled;
 
     // FPS tracking
     private int  fpsCounter;
@@ -194,6 +179,7 @@ public class GamePanel extends JPanel {
     /** Accumulates characters typed by the player until ENTER is pressed. */
     private final StringBuilder chatInput = new StringBuilder();
 
+
     // -----------------------------------------------------------------------
     //  Construction
     // -----------------------------------------------------------------------
@@ -204,45 +190,77 @@ public class GamePanel extends JPanel {
         setFocusable(true);
 
         world  = new World();
-        // Player spawns near col 12, row 9 (away from centre objects)
         player = new Player(
                 12 * Constants.TILE_SIZE,
                 9  * Constants.TILE_SIZE
         );
+
         mouseHandler      = new MouseHandler();
         movementSystem    = new MovementSystem();
         woodcuttingSystem = new WoodcuttingSystem();
         miningSystem      = new MiningSystem();
         combatSystem      = new CombatSystem();
         dialogueSystem    = new DialogueSystem();
-        questSystem       = new QuestSystem();
-        shopSystem        = new ShopSystem();
         soundSystem       = new SoundSystem();
         gameLoop          = new GameLoop(this);
 
-        // Attempt server connection.  If the server is offline this is a no-op
-        // and the game runs in single-player mode.
         clientConnection.setListener(new ClientConnection.Listener() {
             @Override public void onConnected(String assignedId) {
                 player.setId(assignedId);
                 chatBox.post("Connected as " + assignedId + ".  Press ENTER to chat.",
-                             ChatBox.COLOR_SYSTEM);
+                        ChatBox.COLOR_SYSTEM);
             }
+
             @Override public void onDisconnected() {
                 chatBox.post("Disconnected from server.", ChatBox.COLOR_SYSTEM);
             }
+
             @Override public void onChat(String fromId, String message) {
-                // Skip our own ID — we already posted it locally in sendChatInput()
-                // to give instant feedback without waiting for the server round-trip.
                 if (fromId.equals(player.getId())) return;
                 chatBox.post("[" + fromId + "]: " + message, ChatBox.COLOR_CHAT);
             }
         });
+
         clientConnection.connect();
 
-        addMouseListener(new MouseAdapter() {
-            @Override public void mouseClicked(MouseEvent e) { handleClick(e.getX(), e.getY()); }
+        clientConnection.setTreeUpdateListener(clientWorld::updateTrees);
+        clientConnection.setTreeRemoveListener(clientWorld::chopTree);
+        clientConnection.setTreeAddListener(clientWorld::addTree);
+
+        clientConnection.setRockUpdateListener(clientWorld::updateRocks);
+        clientConnection.setRockRemoveListener(clientWorld::mineRock);
+        clientConnection.setRockAddListener(clientWorld::addRock);
+
+        clientConnection.setNpcUpdateListener(clientWorld::updateNpcs);
+        clientConnection.setEnemyUpdateListener(clientWorld::updateEnemies);
+
+        clientConnection.setPlayerHpListener(newHp -> {
+            int delta = player.getHp() - newHp;
+            player.setHp(newHp);
+            if (newHp > 0) deathHandled = false;
+            if (delta > 0) spawnDamage(player.getCenterX(), player.getY() - 4, delta, true);
+            if (player.isDead()) handlePlayerDeath();
         });
+
+        clientConnection.setLootUpdateListener(clientWorld::updateLoot);
+        clientConnection.setLootAddListener(clientWorld::addLoot);
+        clientConnection.setLootRemoveListener(clientWorld::removeLoot);
+        clientConnection.setInventoryListener(inv -> player.applyInventoryUpdate(inv));
+
+        clientConnection.setSkillXpListener(parts -> {
+            try {
+                String skillName = parts[0].toLowerCase();
+                int xp = Integer.parseInt(parts[1]);
+                player.getSkillSystem().addXp(skillName, xp);
+            } catch (NumberFormatException ignored) {}
+        });
+
+        addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                handleClick(e.getX(), e.getY());
+            }
+        });
+
         addMouseMotionListener(new MouseMotionAdapter() {
             @Override public void mouseMoved(MouseEvent e) {
                 hoverX = e.getX();
@@ -250,19 +268,24 @@ public class GamePanel extends JPanel {
                 rightPanel.handleMouseMove(e.getX(), e.getY());
                 updateCursorForHover(e.getX(), e.getY());
             }
+
             @Override public void mouseDragged(MouseEvent e) {
                 hoverX = e.getX();
                 hoverY = e.getY();
                 rightPanel.handleMouseMove(e.getX(), e.getY());
             }
         });
+
         addKeyListener(new KeyAdapter() {
-            @Override public void keyPressed(KeyEvent e) { handleKey(e.getKeyCode()); }
-            /** Capture printable characters for chat input. */
-            @Override public void keyTyped(KeyEvent e)   { handleCharTyped(e.getKeyChar()); }
+            @Override public void keyPressed(KeyEvent e) {
+                handleKey(e.getKeyCode());
+            }
+
+            @Override public void keyTyped(KeyEvent e) {
+                handleCharTyped(e.getKeyChar());
+            }
         });
     }
-
     // -----------------------------------------------------------------------
     //  Input — keyboard
     // -----------------------------------------------------------------------
@@ -307,18 +330,11 @@ public class GamePanel extends JPanel {
                 break;
 
             case KeyEvent.VK_S:
-                SaveSystem.save(player, questSystem);
-                showMessage("Game saved!  (L to load)");
+                showMessage("Local save is disabled in server-authoritative mode.");
                 break;
 
             case KeyEvent.VK_L:
-                if (SaveSystem.load(player, questSystem)) {
-                    stopAllActivities();
-                    mouseHandler.clearTarget();
-                    showMessage("Game loaded!");
-                } else {
-                    showMessage("No save file found.");
-                }
+                showMessage("Local load is disabled in server-authoritative mode.");
                 break;
 
             case KeyEvent.VK_D:
@@ -333,8 +349,6 @@ public class GamePanel extends JPanel {
             case KeyEvent.VK_ESCAPE:
                 if (gameState == GameState.IN_DIALOGUE) {
                     dialogueSystem.close();
-                    gameState = GameState.PLAYING;
-                } else if (gameState == GameState.IN_SHOP) {
                     gameState = GameState.PLAYING;
                 }
                 break;
@@ -391,12 +405,6 @@ public class GamePanel extends JPanel {
             return;
         }
 
-        // Shop: route to hit-testing inside the overlay (screen-space coords)
-        if (gameState == GameState.IN_SHOP) {
-            handleShopClick(cx, cy);
-            return;
-        }
-
         // --- PLAYING state ---
 
         // Route right-panel clicks (tab switching, inventory hover, etc.)
@@ -417,7 +425,7 @@ public class GamePanel extends JPanel {
         int worldY = clickTileRow * Constants.TILE_SIZE + Constants.TILE_SIZE / 2;
 
         // 0. NPC? (highest priority — before enemies so clicking the guide doesn't fight)
-        NPC clickedNPC = world.getNPCAt(worldX, worldY);
+        NPC clickedNPC = clientWorld.getNpcAt(worldX, worldY);
         if (clickedNPC != null) {
             stopAllActivities();
             activeNPC = clickedNPC;
@@ -426,7 +434,7 @@ public class GamePanel extends JPanel {
         }
 
         // 1. Enemy?
-        Enemy clickedEnemy = world.getEnemyAt(worldX, worldY);
+        Enemy clickedEnemy = clientWorld.getEnemyAt(worldX, worldY);
         if (clickedEnemy != null) {
             stopAllActivities();
             activeEnemy = clickedEnemy;
@@ -435,7 +443,7 @@ public class GamePanel extends JPanel {
         }
 
         // 2. Tree?
-        Tree clickedTree = world.getTreeAt(worldX, worldY);
+        Tree clickedTree = clientWorld.getTreeAt(worldX, worldY);
         if (clickedTree != null) {
             stopAllActivities();
             activeTree = clickedTree;
@@ -444,7 +452,7 @@ public class GamePanel extends JPanel {
         }
 
         // 3. Rock?
-        Rock clickedRock = world.getRockAt(worldX, worldY);
+        Rock clickedRock = clientWorld.getRockAt(worldX, worldY);
         if (clickedRock != null) {
             stopAllActivities();
             activeRock = clickedRock;
@@ -452,7 +460,16 @@ public class GamePanel extends JPanel {
             return;
         }
 
-        // 4. Ground — pathfind to the clicked tile
+        // 4. Loot?
+        Loot clickedLoot = clientWorld.getLootAt(worldX, worldY);
+        if (clickedLoot != null) {
+            stopAllActivities();
+            activeLoot = clickedLoot;
+            setApproachTarget(clickedLoot);
+            return;
+        }
+
+        // 5. Ground — pathfind to the clicked tile
         stopAllActivities();
         // clickTileCol/Row already computed from iso click above
         int goalCol  = clickTileCol;
@@ -460,7 +477,8 @@ public class GamePanel extends JPanel {
         int startCol = Pathfinding.pixelToTileCol(player.getCenterX());
         int startRow = Pathfinding.pixelToTileRow(player.getCenterY());
 
-        List<Point> path = Pathfinding.findPath(startCol, startRow, goalCol, goalRow, world);
+        List<Point> path = Pathfinding.findPath(startCol, startRow, goalCol, goalRow, world,
+                clientWorld::isBlocked);
         if (!path.isEmpty()) {
             movementSystem.setPath(path);
         } else {
@@ -492,7 +510,8 @@ public class GamePanel extends JPanel {
         int startCol = Pathfinding.pixelToTileCol(player.getCenterX());
         int startRow = Pathfinding.pixelToTileRow(player.getCenterY());
 
-        List<Point> path = Pathfinding.findPath(startCol, startRow, goalCol, goalRow, world);
+        List<Point> path = Pathfinding.findPath(startCol, startRow, goalCol, goalRow, world,
+                clientWorld::isBlocked);
         if (!path.isEmpty()) {
             movementSystem.setPath(path);
             mouseHandler.clearTarget();
@@ -515,6 +534,7 @@ public class GamePanel extends JPanel {
         activeRock  = null;
         activeEnemy = null;
         activeNPC   = null;
+        activeLoot  = null;
     }
 
     // -----------------------------------------------------------------------
@@ -527,83 +547,8 @@ public class GamePanel extends JPanel {
             return;
         }
 
-        // Final line acknowledged — resolve quest events
-        Quest quest = questSystem.getGettingStarted();
         dialogueSystem.close();
-
-        if (quest.getState() == Quest.State.NOT_STARTED) {
-            quest.start();
-            showMessage("Quest Started: Getting Started!");
-            gameState = GameState.PLAYING;
-
-        } else if (quest.getState() == Quest.State.IN_PROGRESS && quest.isLogsStepDone()) {
-            quest.complete();
-            giveQuestReward();
-            gameState = GameState.PLAYING;
-
-        } else if (quest.getState() == Quest.State.COMPLETE) {
-            gameState = GameState.IN_SHOP;
-
-        } else {
-            gameState = GameState.PLAYING;
-        }
-    }
-
-    private void giveQuestReward() {
-        Item coins = new Item("Coins", true);
-        coins.setCount(50);
-        player.getInventory().addItem(coins);
-        player.getSkillSystem().addXp("woodcutting", 100);
-        player.getSkillSystem().addXp("mining", 50);
-        soundSystem.play(SoundSystem.Sound.LEVEL_UP);
-        showMessage("Quest Complete!  Reward: 50 Coins + Bonus XP!");
-    }
-
-    private void handleShopClick(int cx, int cy) {
-        // Close button
-        if (cx >= SHOP_X + SHOP_W - 28 && cx <= SHOP_X + SHOP_W - 6
-         && cy >= SHOP_Y + 6           && cy <= SHOP_Y + 26) {
-            gameState = GameState.PLAYING;
-            return;
-        }
-
-        // Buy rows (left column)
-        List<ShopSystem.ShopEntry> stock = shopSystem.getStock();
-        int buyX = SHOP_X + 10;
-        int buyY = SHOP_Y + 55;
-        for (int i = 0; i < stock.size(); i++) {
-            int rowY = buyY + i * 36;
-            if (cx >= buyX && cx <= buyX + 225
-             && cy >= rowY && cy <= rowY + 32) {
-                String err = shopSystem.buyItem(stock.get(i).name, player.getInventory());
-                if (err == null) {
-                    soundSystem.play(SoundSystem.Sound.ITEM_PICKUP);
-                    showMessage("Bought " + stock.get(i).name + "!");
-                } else {
-                    showMessage(err);
-                }
-                return;
-            }
-        }
-
-        // Sell rows (right column)
-        List<Item> sellable = getSellableItems();
-        int sellX = SHOP_X + SHOP_W / 2 + 10;
-        int sellY = SHOP_Y + 55;
-        for (int i = 0; i < sellable.size(); i++) {
-            int rowY = sellY + i * 36;
-            if (cx >= sellX && cx <= sellX + 225
-             && cy >= rowY  && cy <= rowY + 32) {
-                String err = shopSystem.sellItem(sellable.get(i).getName(), player.getInventory());
-                if (err == null) {
-                    soundSystem.play(SoundSystem.Sound.ITEM_PICKUP);
-                    showMessage("Sold " + sellable.get(i).getName() + "!");
-                } else {
-                    showMessage(err);
-                }
-                return;
-            }
-        }
+        gameState = GameState.PLAYING;
     }
 
     // -----------------------------------------------------------------------
@@ -617,17 +562,13 @@ public class GamePanel extends JPanel {
 
     /** Called once per frame by GameLoop. */
     public void update(double deltaTime) {
-        // World object timers always tick (respawns, regrowth)
-        world.updateTrees(deltaTime);
-        world.updateRocks(deltaTime);
-        world.updateEnemies(deltaTime);
-
         if (gameState == GameState.PLAYING) {
             movementSystem.update(player, mouseHandler, deltaTime);
             updateTreeInteraction(deltaTime);
             updateRockInteraction(deltaTime);
             updateCombat(deltaTime);
-            updateNPCInteraction(deltaTime);
+            updateLootInteraction();
+            updateNPCInteraction();
 
             if (player.isDead()) handlePlayerDeath();
 
@@ -736,49 +677,27 @@ public class GamePanel extends JPanel {
             return;
         }
 
-        if (distanceTo(player, activeTree) <= Constants.TILE_SIZE * 1.6) {
+        if (isWithinInteractionRange(player, activeTree)) {
             if (!woodcuttingSystem.isChopping()) {
                 woodcuttingSystem.startChopping(activeTree);
                 showMessage("You swing your axe...");
             }
-            if (woodcuttingSystem.update(deltaTime)) applyChopReward();
+            if (woodcuttingSystem.update(deltaTime)) sendChopRequest();
         }
     }
 
-    private void applyChopReward() {
-        Skill wc          = player.getSkillSystem().getSkill("woodcutting");
-        int   levelBefore = wc.getLevel();
-
-        boolean logsAdded = woodcuttingSystem.grantReward(
-                player.getSkillSystem(), player.getInventory());
-
-        questSystem.onLogChopped();
+    private void sendChopRequest() {
+        if (activeTree != null) {
+            clientConnection.sendChop(activeTree.getId());
+        }
+        // Offline fallback: award XP locally when not connected to server
+        if (!clientConnection.isConnected()) {
+            player.getSkillSystem().addXp("woodcutting", WoodcuttingSystem.XP_PER_CHOP);
+        }
+        woodcuttingSystem.stopChopping();
         activeTree = null;
-
         soundSystem.play(SoundSystem.Sound.CHOP);
-
-        if (!logsAdded) {
-            showMessage("Your inventory is full!");
-            return;
-        }
-
-        spawnText(player.getCenterX(), player.getY() - 14,
-                  "+" + WoodcuttingSystem.XP_PER_CHOP + " WC XP",
-                  new Color(120, 230, 120));
-
-        if (wc.getLevel() > levelBefore) {
-            soundSystem.play(SoundSystem.Sound.LEVEL_UP);
-            showMessage("Level up! Woodcutting is now level " + wc.getLevel() + "!");
-        } else {
-            Quest quest = questSystem.getGettingStarted();
-            if (quest.getState() == Quest.State.IN_PROGRESS && !quest.isLogsStepDone()) {
-                showMessage("You got some Logs.  [" + quest.getLogsChopped() + "/3 for quest]");
-            } else if (quest.getState() == Quest.State.IN_PROGRESS && quest.isLogsStepDone()) {
-                showMessage("You got some Logs.  [Quest step done — talk to Guide!]");
-            } else {
-                showMessage("You got some Logs.  (+" + WoodcuttingSystem.XP_PER_CHOP + " WC XP)");
-            }
-        }
+        showMessage("Chop request sent to server.");
     }
 
     private void updateRockInteraction(double deltaTime) {
@@ -790,102 +709,106 @@ public class GamePanel extends JPanel {
             return;
         }
 
-        if (distanceTo(player, activeRock) <= Constants.TILE_SIZE * 1.6) {
+        if (isWithinInteractionRange(player, activeRock)) {
             if (!miningSystem.isMining()) {
                 miningSystem.startMining(activeRock);
                 showMessage("You swing your pickaxe...");
             }
-            if (miningSystem.update(deltaTime)) applyMineReward();
+            if (miningSystem.update(deltaTime)) sendMineRequest();
         }
     }
 
-    private void applyMineReward() {
-        Skill mining      = player.getSkillSystem().getSkill("mining");
-        int   levelBefore = mining.getLevel();
+    private void sendMineRequest() {
+        String rockId = (activeRock != null) ? activeRock.getId() : null;
 
-        boolean oreAdded = miningSystem.grantReward(
-                player.getSkillSystem(), player.getInventory());
-
+        if (rockId != null) clientConnection.sendMine(rockId);
+        // Offline fallback: award XP locally when not connected to server
+        if (!clientConnection.isConnected()) {
+            player.getSkillSystem().addXp("mining", MiningSystem.XP_PER_MINE);
+        }
+        miningSystem.stopMining();
         activeRock = null;
         soundSystem.play(SoundSystem.Sound.MINE);
-
-        if (!oreAdded) {
-            showMessage("Your inventory is full!");
-            return;
-        }
-
-        spawnText(player.getCenterX(), player.getY() - 14,
-                  "+" + MiningSystem.XP_PER_MINE + " Mining XP",
-                  new Color(140, 170, 230));
-
-        if (mining.getLevel() > levelBefore) {
-            soundSystem.play(SoundSystem.Sound.LEVEL_UP);
-            showMessage("Level up! Mining is now level " + mining.getLevel() + "!");
-        } else {
-            showMessage("You got some Ore.  (+" + MiningSystem.XP_PER_MINE + " Mining XP)");
-        }
+        showMessage("Mine request sent to server.");
     }
+
+    // Offline-only: simple timer for enemy counter-attacks when server is unavailable.
+    private double offlineEnemyAttackTimer = 0;
+    private static final double OFFLINE_ENEMY_TICK = 2.0; // seconds between enemy hits offline
 
     private void updateCombat(double deltaTime) {
         if (activeEnemy == null) return;
 
         if (!activeEnemy.isAlive()) {
             combatSystem.stopCombat();
+            offlineEnemyAttackTimer = 0;
             activeEnemy = null;
             return;
         }
 
-        if (distanceTo(player, activeEnemy) <= Constants.TILE_SIZE * 1.6) {
+        if (isWithinInteractionRange(player, activeEnemy)) {
             if (!combatSystem.isInCombat()) {
                 combatSystem.startCombat(activeEnemy);
+                offlineEnemyAttackTimer = OFFLINE_ENEMY_TICK;
                 showMessage("You attack the " + activeEnemy.getName() + "!");
             }
             CombatSystem.CombatResult result = combatSystem.update(player, deltaTime);
             if (result != null) applyCombatResult(result);
+
+            // Offline fallback: enemy deals damage locally since no server is running.
+            if (!clientConnection.isConnected()) {
+                offlineEnemyAttackTimer -= deltaTime;
+                if (offlineEnemyAttackTimer <= 0) {
+                    offlineEnemyAttackTimer = OFFLINE_ENEMY_TICK;
+                    int enemyDmg = 1 + (int)(Math.random() * activeEnemy.getStrengthLevel());
+                    int newHp = Math.max(0, player.getHp() - enemyDmg);
+                    player.setHp(newHp);
+                    spawnDamage(player.getCenterX(), player.getY() - 4, enemyDmg, true);
+                    if (player.isDead()) handlePlayerDeath();
+                }
+            }
         }
     }
 
     private void applyCombatResult(CombatSystem.CombatResult result) {
-        activeEnemy.takeDamage(result.playerDmg);
-        spawnDamage(activeEnemy.getCenterX(), activeEnemy.getY() - 4,
-                    result.playerDmg, false);
+        if (activeEnemy == null) return;
 
-        if (activeEnemy.isAlive()) {
-            player.takeDamage(result.enemyDmg);
-            spawnDamage(player.getCenterX(), player.getY() - 4,
-                        result.enemyDmg, true);
-        }
+        // Send attack request to server. Server rolls its own authoritative damage —
+        // the result.playerDmg value here is only used for immediate floating text.
+        clientConnection.sendAttack(activeEnemy.getId(), result.playerDmg);
+        spawnDamage(activeEnemy.getCenterX(), activeEnemy.getY() - 4, result.playerDmg, false);
+
+        // Enemy → player damage arrives via PLAYER_HP from the server (playerHpListener).
+        // No local HP mutation needed here — the server is authoritative.
 
         soundSystem.play(SoundSystem.Sound.HIT);
-
         if (activeEnemy.isDead()) {
-            collectLoot(activeEnemy);
             combatSystem.stopCombat();
             activeEnemy = null;
         }
     }
 
-    private void collectLoot(Enemy enemy) {
-        List<Item> drops = enemy.rollLoot();
-        if (drops.isEmpty()) {
-            showMessage("You killed the " + enemy.getName() + ".");
+    private void updateLootInteraction() {
+        if (activeLoot == null) return;
+        if (clientWorld.getLootAt((int) activeLoot.getCenterX(), (int) activeLoot.getCenterY()) == null) {
+            activeLoot = null;
             return;
         }
-
-        StringBuilder msg = new StringBuilder("Killed ").append(enemy.getName()).append("!");
-        for (Item item : drops) {
-            if (player.getInventory().addItem(item)) {
-                msg.append("  +").append(item.getCount()).append(" ").append(item.getName());
-                soundSystem.play(SoundSystem.Sound.ITEM_PICKUP);
-            }
+        if (isWithinInteractionRange(player, activeLoot)) {
+            clientConnection.sendPickup(activeLoot.getId());
+            soundSystem.play(SoundSystem.Sound.ITEM_PICKUP);
+            showMessage("Pickup request sent to server.");
+            activeLoot = null;
         }
-        showMessage(msg.toString());
     }
 
-    private void updateNPCInteraction(double deltaTime) {
+    private void updateNPCInteraction() {
         if (activeNPC == null) return;
         if (distanceTo(player, activeNPC) <= Constants.TILE_SIZE * 1.6) {
-            String[] lines = questSystem.getGuideDialogue();
+            String[] lines = {
+                    activeNPC.getName() + ": Interactions are server-authoritative.",
+                    "This client only renders server state and sends input."
+            };
             dialogueSystem.open(activeNPC, lines);
             gameState = GameState.IN_DIALOGUE;
             activeNPC = null;
@@ -893,9 +816,10 @@ public class GamePanel extends JPanel {
     }
 
     private void handlePlayerDeath() {
-        showMessage("You have died!  Respawning...");
+        if (deathHandled) return;
+        deathHandled = true;
         stopAllActivities();
-        player.respawn();
+        showMessage("You have died. Waiting for server respawn/state update.");
     }
 
     // -----------------------------------------------------------------------
@@ -928,10 +852,10 @@ public class GamePanel extends JPanel {
         // Sort by world-space Y (bottom of bounding box) so entities closer to
         // the camera (higher Y) are rendered on top of those further away.
         List<Entity> depthSorted = new ArrayList<>();
-        depthSorted.addAll(world.getRocks());
-        depthSorted.addAll(world.getTrees());
-        depthSorted.addAll(world.getEnemies());
-        depthSorted.addAll(world.getNPCs());
+        depthSorted.addAll(clientWorld.getRocks());
+        depthSorted.addAll(clientWorld.getTrees());
+        depthSorted.addAll(clientWorld.getEnemies());
+        depthSorted.addAll(clientWorld.getNpcs());
         depthSorted.addAll(remotePlayers.values());   // other connected players
         depthSorted.add(player);
         depthSorted.sort(Comparator.comparingDouble(e -> e.getY() + e.getHeight()));
@@ -939,7 +863,6 @@ public class GamePanel extends JPanel {
 
         // World-space overlays
         drawClickIndicator(g2);
-        drawActivityBar(g2);
         renderFloatingTexts(g2);
 
         // ---- Restore to screen space ----
@@ -953,14 +876,12 @@ public class GamePanel extends JPanel {
         g2.fillRect(Constants.PANEL_X - 1, 0, 1, Constants.SCREEN_HEIGHT);
 
         // Right panel — tab system with inventory / skills
-        String combatName = (combatSystem.isInCombat() && combatSystem.getTargetEnemy() != null)
-                ? combatSystem.getTargetEnemy().getName() : null;
         rightPanel.render(g2, player,
-                questSystem.getGettingStarted(),
-                woodcuttingSystem.isChopping(),
-                miningSystem.isMining(),
-                combatSystem.isInCombat(),
-                combatName);
+                null,
+                activeTree != null,
+                activeRock != null,
+                activeEnemy != null,
+                activeEnemy != null ? activeEnemy.getName() : null);
 
         // Chat box — message log (+ typing bar when composing)
         chatBox.render(g2, 0, Constants.VIEWPORT_H - CHAT_H,
@@ -969,8 +890,6 @@ public class GamePanel extends JPanel {
 
         // Full-screen overlays (screen space, rendered over the viewport only)
         if (gameState == GameState.IN_DIALOGUE) drawDialogueBox(g2);
-        if (gameState == GameState.IN_SHOP)     drawShopOverlay(g2);
-
         // Messages, debug, FPS (screen space)
         drawActionMessage(g2);
         if (debugMode) drawDebugOverlay(g2);
@@ -1013,10 +932,10 @@ public class GamePanel extends JPanel {
         // Entity highlight — world centre of the hovered tile
         int worldX = tileCol * Constants.TILE_SIZE + Constants.TILE_SIZE / 2;
         int worldY = tileRow * Constants.TILE_SIZE + Constants.TILE_SIZE / 2;
-        Entity hovered = world.getNPCAt(worldX, worldY);
-        if (hovered == null) hovered = world.getEnemyAt(worldX, worldY);
-        if (hovered == null) hovered = world.getTreeAt(worldX, worldY);
-        if (hovered == null) hovered = world.getRockAt(worldX, worldY);
+        Entity hovered = clientWorld.getNpcAt(worldX, worldY);
+        if (hovered == null) hovered = clientWorld.getEnemyAt(worldX, worldY);
+        if (hovered == null) hovered = clientWorld.getTreeAt(worldX, worldY);
+        if (hovered == null) hovered = clientWorld.getRockAt(worldX, worldY);
         if (hovered == null) return;
 
         // Yellow diamond glow around the entity's tile
@@ -1054,11 +973,11 @@ public class GamePanel extends JPanel {
         int worldX  = col * Constants.TILE_SIZE + Constants.TILE_SIZE / 2;
         int worldY  = row * Constants.TILE_SIZE + Constants.TILE_SIZE / 2;
 
-        if (world.getEnemyAt(worldX, worldY) != null) {
+        if (clientWorld.getEnemyAt(worldX, worldY) != null) {
             setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
-        } else if (world.getTreeAt(worldX, worldY) != null
-                || world.getRockAt(worldX, worldY) != null
-                || world.getNPCAt(worldX, worldY)  != null) {
+        } else if (clientWorld.getTreeAt(worldX, worldY) != null
+                || clientWorld.getRockAt(worldX, worldY) != null
+                || clientWorld.getNpcAt(worldX, worldY)  != null) {
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         } else {
             setCursor(Cursor.getDefaultCursor());
@@ -1085,42 +1004,6 @@ public class GamePanel extends JPanel {
         g.drawLine(cx - r, cy - r, cx + r, cy + r);
         g.drawLine(cx + r, cy - r, cx - r, cy + r);
     }
-
-    /**
-     * Progress bar below the player showing the current timed activity.
-     * Positioned in iso screen space below the player's tile diamond.
-     */
-    private void drawActivityBar(Graphics2D g) {
-        double progress;
-        Color  barColor;
-
-        if (woodcuttingSystem.isChopping()) {
-            progress = woodcuttingSystem.getChopProgress();
-            barColor = new Color(255, 155, 0);
-        } else if (miningSystem.isMining()) {
-            progress = miningSystem.getMineProgress();
-            barColor = new Color(90, 140, 220);
-        } else if (combatSystem.isInCombat()) {
-            progress = combatSystem.getTickProgress();
-            barColor = new Color(215, 55, 55);
-        } else {
-            return;
-        }
-
-        // Position bar just below the player's iso foot point
-        int isoX = IsoUtils.worldToIsoX(player.getX(), player.getY());
-        int isoY = IsoUtils.worldToIsoY(player.getX(), player.getY());
-        int bw = 32;
-        int bh = 4;
-        int bx = isoX + IsoUtils.ISO_TILE_W / 2 - bw / 2;
-        int by = isoY + IsoUtils.ISO_TILE_H + 6;
-
-        g.setColor(new Color(0, 0, 0, 160));
-        g.fillRect(bx, by, bw, bh);
-        g.setColor(barColor);
-        g.fillRect(bx, by, (int)(bw * progress), bh);
-    }
-
 
     private Color iconColorFor(String name) {
         if ("Logs".equals(name))   return new Color(139,  90,  43);
@@ -1168,95 +1051,6 @@ public class GamePanel extends JPanel {
         g.setColor(new Color(170, 170, 170));
         FontMetrics fm = g.getFontMetrics();
         g.drawString(prompt, bx + bw - fm.stringWidth(prompt) - 12, by + bh - 10);
-    }
-
-    /** Centred shop overlay (inside viewport). */
-    private void drawShopOverlay(Graphics2D g) {
-        g.setColor(new Color(0, 0, 0, 150));
-        g.fillRect(0, 0, Constants.VIEWPORT_W, Constants.SCREEN_HEIGHT);
-
-        g.setColor(new Color(20, 16, 8, 245));
-        g.fillRoundRect(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 10, 10);
-        g.setColor(new Color(180, 150, 60));
-        g.drawRoundRect(SHOP_X, SHOP_Y, SHOP_W, SHOP_H, 10, 10);
-
-        g.setFont(new Font("Monospaced", Font.BOLD, 16));
-        g.setColor(new Color(240, 200, 80));
-        FontMetrics fm = g.getFontMetrics();
-        String title = "GUIDE'S SHOP";
-        g.drawString(title, SHOP_X + (SHOP_W - fm.stringWidth(title)) / 2, SHOP_Y + 22);
-
-        // Close button
-        g.setColor(new Color(180, 40, 40));
-        g.fillRect(SHOP_X + SHOP_W - 28, SHOP_Y + 6, 22, 20);
-        g.setFont(new Font("Monospaced", Font.BOLD, 12));
-        g.setColor(Color.WHITE);
-        g.drawString("X", SHOP_X + SHOP_W - 21, SHOP_Y + 20);
-
-        g.setColor(new Color(180, 150, 60, 100));
-        g.drawLine(SHOP_X + 10, SHOP_Y + 30, SHOP_X + SHOP_W - 10, SHOP_Y + 30);
-
-        int midX = SHOP_X + SHOP_W / 2;
-        g.setColor(new Color(100, 100, 100, 160));
-        g.drawLine(midX, SHOP_Y + 32, midX, SHOP_Y + SHOP_H - 10);
-
-        g.setFont(new Font("Monospaced", Font.BOLD, 13));
-        g.setColor(new Color(100, 200, 100));
-        g.drawString("BUY",  SHOP_X + 20, SHOP_Y + 46);
-        g.setColor(new Color(200, 160, 80));
-        g.drawString("SELL", midX  + 20,  SHOP_Y + 46);
-
-        // Buy rows
-        List<ShopSystem.ShopEntry> stock = shopSystem.getStock();
-        g.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        for (int i = 0; i < stock.size(); i++) {
-            ShopSystem.ShopEntry e = stock.get(i);
-            int rowY = SHOP_Y + 55 + i * 36;
-            g.setColor(new Color(50, 45, 20, 180));
-            g.fillRect(SHOP_X + 10, rowY, 225, 32);
-            g.setColor(new Color(100, 85, 35));
-            g.drawRect(SHOP_X + 10, rowY, 225, 32);
-            g.setColor(iconColorFor(e.name));
-            g.fillRect(SHOP_X + 14, rowY + 4, 24, 24);
-            g.setColor(Color.WHITE);
-            g.drawString(e.name, SHOP_X + 44, rowY + 14);
-            g.setColor(new Color(240, 200, 60));
-            g.drawString(e.buyPrice + " Coins", SHOP_X + 44, rowY + 28);
-        }
-
-        // Sell rows
-        List<Item> sellable = getSellableItems();
-        if (sellable.isEmpty()) {
-            g.setFont(new Font("Monospaced", Font.ITALIC, 11));
-            g.setColor(new Color(140, 140, 140));
-            g.drawString("Nothing to sell", midX + 20, SHOP_Y + 75);
-        } else {
-            g.setFont(new Font("Monospaced", Font.PLAIN, 12));
-            for (int i = 0; i < sellable.size(); i++) {
-                Item item  = sellable.get(i);
-                int  rowY  = SHOP_Y + 55 + i * 36;
-                int  price = shopSystem.getSellPrices().getOrDefault(item.getName(), 0);
-                g.setColor(new Color(45, 38, 15, 180));
-                g.fillRect(midX + 10, rowY, 225, 32);
-                g.setColor(new Color(95, 80, 30));
-                g.drawRect(midX + 10, rowY, 225, 32);
-                g.setColor(iconColorFor(item.getName()));
-                g.fillRect(midX + 14, rowY + 4, 24, 24);
-                g.setColor(Color.WHITE);
-                g.drawString(item.getName() + " x" + item.getCount(), midX + 44, rowY + 14);
-                g.setColor(new Color(200, 200, 80));
-                g.drawString(price + " Coins ea", midX + 44, rowY + 28);
-            }
-        }
-
-        g.setFont(new Font("Monospaced", Font.BOLD, 12));
-        g.setColor(new Color(240, 200, 60));
-        g.drawString("Your Coins: " + player.getInventory().countOf("Coins"),
-                     SHOP_X + 10, SHOP_Y + SHOP_H - 10);
-        g.setFont(new Font("Monospaced", Font.ITALIC, 10));
-        g.setColor(new Color(150, 150, 150));
-        g.drawString("Click item to buy/sell  |  ESC to close",
-                     SHOP_X + 125, SHOP_Y + SHOP_H - 10);
     }
 
     /** Fading centred message near the top of the viewport. */
@@ -1436,25 +1230,14 @@ public class GamePanel extends JPanel {
         floatingTexts.add(new FloatingText(isoFtX, isoFtY, text, c));
     }
 
-    /** Spawn a floating text label (XP gained, item pickups, etc.). */
-    private void spawnText(double x, double y, String text, Color color) {
-        double isoFtX = IsoUtils.worldToIsoX(x, y) + IsoUtils.ISO_TILE_W / 2.0 - 6;
-        double isoFtY = IsoUtils.worldToIsoY(x, y) - 12;
-        floatingTexts.add(new FloatingText(isoFtX, isoFtY, text, color));
-    }
-
     private double distanceTo(Entity a, Entity b) {
         double dx = a.getCenterX() - b.getCenterX();
         double dy = a.getCenterY() - b.getCenterY();
         return Math.sqrt(dx * dx + dy * dy);
     }
 
-    private List<Item> getSellableItems() {
-        List<Item> result = new ArrayList<>();
-        for (Item item : player.getInventory().getSlots()) {
-            if (shopSystem.getSellPrices().containsKey(item.getName())) result.add(item);
-        }
-        return result;
+    private boolean isWithinInteractionRange(Entity a, Entity b) {
+        return distanceTo(a, b) <= Constants.TILE_SIZE * 1.6;
     }
 
     private void trackFps() {
@@ -1466,9 +1249,4 @@ public class GamePanel extends JPanel {
             fpsTimer     = now;
         }
     }
-
-    // -----------------------------------------------------------------------
-    //  Inner class: floating text label
-    // -----------------------------------------------------------------------
-
 }

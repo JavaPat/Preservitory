@@ -1,8 +1,6 @@
 package com.classic.preservitory.system;
 
 import com.classic.preservitory.item.Inventory;
-import com.classic.preservitory.item.Item;
-
 import java.util.*;
 
 /**
@@ -11,7 +9,8 @@ import java.util.*;
  * BUY  — items available for purchase with Coins.
  * SELL — items the player can sell for Coins (Logs, Ore).
  *
- * All transactions operate directly on the player's Inventory.
+ * Transaction resolution is server-owned. The client keeps stock/pricing data
+ * only for rendering and must not mutate inventory locally.
  */
 public class ShopSystem {
 
@@ -58,16 +57,7 @@ public class ShopSystem {
      * @return null on success, or a human-readable error string.
      */
     public String buyItem(String name, Inventory inventory) {
-        ShopEntry entry = findEntry(name);
-        if (entry == null) return "That item is not in stock.";
-
-        if (inventory.countOf("Coins") < entry.buyPrice) {
-            return "Not enough Coins! (need " + entry.buyPrice + ")";
-        }
-
-        inventory.removeItem("Coins", entry.buyPrice);
-        inventory.addItem(new Item(entry.name, entry.stackable));
-        return null;
+        return "Shop transactions are server-authoritative and unavailable on this client.";
     }
 
     /**
@@ -76,16 +66,7 @@ public class ShopSystem {
      * @return null on success, or a human-readable error string.
      */
     public String sellItem(String name, Inventory inventory) {
-        Integer price = sellPrices.get(name);
-        if (price == null) return "That item has no sell value.";
-        if (inventory.countOf(name) <= 0) return "You don't have that item.";
-
-        inventory.removeItem(name, 1);
-
-        Item coins = new Item("Coins", true);
-        coins.addCount(price - 1); // Item starts at count 1; add the remainder
-        inventory.addItem(coins);
-        return null;
+        return "Shop transactions are server-authoritative and unavailable on this client.";
     }
 
     // -----------------------------------------------------------------------

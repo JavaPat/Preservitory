@@ -1,7 +1,6 @@
 package com.classic.preservitory.world.objects;
 
 import com.classic.preservitory.entity.Enemy;
-import com.classic.preservitory.item.LootTable;
 import com.classic.preservitory.util.Constants;
 import com.classic.preservitory.util.IsoUtils;
 
@@ -13,8 +12,6 @@ import java.awt.Graphics;
  * A Goblin — the simplest combat enemy.
  *
  * Stats  : Attack 3, Strength 4, Defence 2, HP 10
- * Drops  : Coins (always, 3–15), Logs (25% chance)
- * Respawn: 8 seconds after death
  *
  * Rendered in isometric style: a humanoid figure standing on its tile.
  * The foot (anchor) point is the bottom-centre of the tile's diamond.
@@ -27,14 +24,7 @@ public class Goblin extends Enemy {
               /* maxHp */       10,
               /* attackLevel */ 3,
               /* strength */    4,
-              /* defence */     2,
-              /* respawnTime */ 8.0);
-    }
-
-    @Override
-    protected void buildLootTable(LootTable table) {
-        table.addEntry("Coins", true, 3, 15, 1.00);  // always
-        table.addEntry("Logs",  true, 1,  1, 0.25);  // 25% chance
+              /* defence */     2);
     }
 
     // -----------------------------------------------------------------------

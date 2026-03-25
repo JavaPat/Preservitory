@@ -8,51 +8,63 @@ import java.awt.Color;
 import java.awt.Graphics;
 
 /**
- * A minable rock that gives Ore and Mining XP when clicked.
+ * A minable rock whose alive/depleted state is driven entirely by the server.
+ * The client never runs respawn timers or mine logic — it is a pure renderer
+ * of server-authoritative state.
  *
- * Life-cycle mirrors Tree:
- *   SOLID    — intact, player can mine it
- *   DEPLETED — just mined; a fragment remains; respawns after RESPAWN_TIME seconds
- *
- * Rendered in isometric style: a grey oval sitting on the tile surface.
+ * Visual states:
+ *   SOLID    — intact rock, player can mine it
+ *   DEPLETED — just mined; a fragment remains; server triggers respawn
  */
 public class Rock extends Entity {
 
     public enum State { SOLID, DEPLETED }
 
-    private static final double RESPAWN_TIME = 8.0;
+    private State state;
 
-    private State  state;
-    private double respawnTimer;
+    private final String id;
 
-    public Rock(double x, double y) {
+    public Rock(String id, double x, double y) {
         super(x, y, Constants.TILE_SIZE, Constants.TILE_SIZE);
+        this.id    = id;
         this.state = State.SOLID;
     }
 
-    // -----------------------------------------------------------------------
-    //  Logic
-    // -----------------------------------------------------------------------
+    public String getId() { return id; }
 
-    /** Must be called every frame. Ticks the respawn counter. */
-    public void update(double deltaTime) {
-        if (state == State.DEPLETED) {
-            respawnTimer -= deltaTime;
-            if (respawnTimer <= 0) {
-                state = State.SOLID;
-            }
-        }
+    public void setPosition(double x, double y) {
+        setX(x);
+        setY(y);
     }
 
-    /** Called by MiningSystem when a mine swing completes. */
+    // -----------------------------------------------------------------------
+    //  Visual state — set by server events only
+    // -----------------------------------------------------------------------
+
+    /**
+     * Set the visual state of this rock.
+     * {@code true} → solid (alive).
+     * {@code false} → depleted (mined).
+     * No timers are started or modified.
+     */
+    public void setAlive(boolean alive) {
+        state = alive ? State.SOLID : State.DEPLETED;
+    }
+
+    /** Convenience alias for {@code setAlive(false)} — kept for MiningSystem compatibility. */
     public void deplete() {
-        state        = State.DEPLETED;
-        respawnTimer = RESPAWN_TIME;
+        setAlive(false);
     }
 
-    public boolean isSolid() { return state == State.SOLID; }
+    /** Convenience alias for {@code setAlive(true)}. */
+    public void restore() {
+        setAlive(true);
+    }
 
-    /** True when the world-space point (px, py) is inside this rock and it is solid. */
+    public boolean isSolid() {
+        return state == State.SOLID;
+    }
+
     public boolean containsPoint(int px, int py) {
         return state == State.SOLID
                 && px >= x && px <= x + width
@@ -65,11 +77,9 @@ public class Rock extends Entity {
 
     @Override
     public void render(Graphics g) {
-        // Iso position of tile top-left
         int isoX = IsoUtils.worldToIsoX(x, y);
         int isoY = IsoUtils.worldToIsoY(x, y);
 
-        // "Foot" = bottom-centre of the tile diamond
         int footX = isoX + IsoUtils.ISO_TILE_W / 2;
         int footY = isoY + IsoUtils.ISO_TILE_H;
 
@@ -81,7 +91,6 @@ public class Rock extends Entity {
     }
 
     private void renderSolid(Graphics g, int footX, int footY) {
-        // Main rock oval sitting on the ground
         int rw = 30;
         int rh = 20;
         int rx = footX - rw / 2;
@@ -90,22 +99,19 @@ public class Rock extends Entity {
         g.setColor(new Color(118, 118, 124));
         g.fillOval(rx, ry, rw, rh);
 
-        // Lighter highlight on top-left
         g.setColor(new Color(172, 172, 178));
         g.fillOval(rx + 4, ry + 3, rw / 2, rh / 2);
 
-        // Ore vein — reddish-brown specks (visual cue it's minable)
+        // Ore vein — reddish-brown specks
         g.setColor(new Color(148, 78, 58));
         g.fillRect(rx + rw / 2 - 2, ry + rh / 2, 5, 4);
         g.fillRect(rx + rw / 2 + 4, ry + rh / 3, 4, 3);
 
-        // Outline
         g.setColor(new Color(65, 65, 70));
         g.drawOval(rx, ry, rw, rh);
     }
 
     private void renderDepleted(Graphics g, int footX, int footY) {
-        // Small dark fragment to show the rock has been mined
         int rw = 16;
         int rh = 10;
         int rx = footX - rw / 2;
@@ -115,15 +121,5 @@ public class Rock extends Entity {
         g.fillOval(rx, ry, rw, rh);
         g.setColor(new Color(45, 45, 50));
         g.drawOval(rx, ry, rw, rh);
-
-        // Respawn progress bar
-        double progress = 1.0 - (respawnTimer / RESPAWN_TIME);
-        int barW = IsoUtils.ISO_TILE_W / 2;
-        int barX = footX - barW / 2;
-        int barY = footY + 4;
-        g.setColor(new Color(0, 0, 0, 120));
-        g.fillRect(barX, barY, barW, 4);
-        g.setColor(new Color(140, 140, 175, 200));
-        g.fillRect(barX, barY, (int)(barW * progress), 4);
     }
 }

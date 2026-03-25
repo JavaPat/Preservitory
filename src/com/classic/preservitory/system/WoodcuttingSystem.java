@@ -1,7 +1,5 @@
 package com.classic.preservitory.system;
 
-import com.classic.preservitory.item.Inventory;
-import com.classic.preservitory.item.Item;
 import com.classic.preservitory.world.objects.Tree;
 
 /**
@@ -10,8 +8,7 @@ import com.classic.preservitory.world.objects.Tree;
  * How it works each frame:
  *   1. update() counts down the chop timer.
  *   2. When the timer expires it returns true — the caller (GamePanel)
- *      then calls grantReward() to apply XP and items.
- *   3. grantReward() chops the tree (turning it into a stump) and resets state.
+ *      then sends the chop request to the server.
  *
  * The caller is responsible for checking proximity and calling startChopping()
  * when the player first arrives next to a tree.
@@ -59,7 +56,7 @@ public class WoodcuttingSystem {
      * Tick the chop timer.
      *
      * @return true exactly once when a chop completes; false every other frame.
-     *         The caller must then call grantReward().
+     *         The caller must then send a server request.
      */
     public boolean update(double deltaTime) {
         if (!chopping || targetTree == null) return false;
@@ -76,33 +73,6 @@ public class WoodcuttingSystem {
             return true;
         }
         return false;
-    }
-
-    // -----------------------------------------------------------------------
-    //  Rewards
-    // -----------------------------------------------------------------------
-
-    /**
-     * Apply the chop reward: add XP, add Logs, chop the tree.
-     * Always call this immediately after update() returns true.
-     *
-     * @return true  if logs were successfully added to the inventory
-     *         false if the inventory was full (XP is still granted)
-     */
-    public boolean grantReward(SkillSystem skillSystem, Inventory inventory) {
-        // XP is always awarded
-        skillSystem.addXp("woodcutting", XP_PER_CHOP);
-
-        // Logs go into inventory (might fail if full)
-        boolean logsAdded = inventory.addItem(new Item("Logs", true));
-
-        // Chop the tree — it becomes a stump for RESPAWN_TIME seconds
-        if (targetTree != null) {
-            targetTree.chop();
-        }
-
-        stopChopping();
-        return logsAdded;
     }
 
     // -----------------------------------------------------------------------

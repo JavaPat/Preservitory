@@ -1,6 +1,7 @@
 package com.classic.preservitory.entity;
 
 import com.classic.preservitory.item.Inventory;
+import com.classic.preservitory.item.Item;
 import com.classic.preservitory.system.SkillSystem;
 import com.classic.preservitory.util.Constants;
 import com.classic.preservitory.util.IsoUtils;
@@ -9,6 +10,8 @@ import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * The player character.
@@ -55,8 +58,9 @@ public class Player extends Entity {
     //  Inventory & skills
     // -----------------------------------------------------------------------
 
-    private final Inventory   inventory;
-    private final SkillSystem skillSystem;
+    private final Inventory            inventory;
+    private final Map<String, Integer> inventoryState = new HashMap<>();
+    private final SkillSystem          skillSystem;
 
     // -----------------------------------------------------------------------
     //  Combat stats
@@ -67,10 +71,6 @@ public class Player extends Entity {
     private int defenceLevel  = 5;
     private int maxHp         = 25;
     private int hp;
-
-    /** Position to teleport back to on death. */
-    private final double spawnX;
-    private final double spawnY;
 
     // -----------------------------------------------------------------------
     //  Animation
@@ -88,8 +88,6 @@ public class Player extends Entity {
         this.inventory   = new Inventory();
         this.skillSystem = new SkillSystem();
         this.hp          = maxHp;
-        this.spawnX      = startX;
-        this.spawnY      = startY;
     }
 
     // -----------------------------------------------------------------------
@@ -112,19 +110,40 @@ public class Player extends Entity {
     //  Combat
     // -----------------------------------------------------------------------
 
-    /** Subtract damage from HP (clamped to 0). */
-    public void takeDamage(int amount) {
-        hp = Math.max(0, hp - amount);
+    /** Set HP to an authoritative server value (clamped to [0, maxHp]). */
+    public void setHp(int value) {
+        hp = Math.max(0, Math.min(maxHp, value));
     }
 
     /** True when HP has reached zero. */
     public boolean isDead() { return hp <= 0; }
 
-    /** Reset HP and position to spawn. Called by GamePanel on death. */
-    public void respawn() {
-        hp = maxHp;
-        x  = spawnX;
-        y  = spawnY;
+    /**
+     * Apply a full server-authoritative inventory snapshot.
+     * The map is the source of truth; the Inventory object is rebuilt so
+     * existing UI code can continue rendering without local mutation paths.
+     */
+    public void applyInventoryUpdate(Map<String, Integer> newInventory) {
+        inventoryState.clear();
+        inventory.clear();
+
+        if (newInventory == null || newInventory.isEmpty()) {
+            return;
+        }
+
+        for (Map.Entry<String, Integer> entry : newInventory.entrySet()) {
+            String itemName = entry.getKey();
+            Integer amount = entry.getValue();
+            if (itemName == null || itemName.isEmpty() || amount == null || amount <= 0) {
+                continue;
+            }
+
+            inventoryState.put(itemName, amount);
+
+            Item item = new Item(itemName, true);
+            item.setCount(amount);
+            inventory.addItem(item);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -242,6 +261,7 @@ public class Player extends Entity {
     public void        setSpeed(double s) { this.speed = s; }
 
     public Inventory   getInventory()     { return inventory; }
+    public Map<String, Integer> getInventoryState() { return inventoryState; }
     public SkillSystem getSkillSystem()   { return skillSystem; }
     public Animation   getAnimation()     { return animation; }
 

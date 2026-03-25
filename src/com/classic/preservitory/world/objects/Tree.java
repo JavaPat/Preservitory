@@ -8,57 +8,59 @@ import java.awt.Color;
 import java.awt.Graphics;
 
 /**
- * A tree that the player can chop for Woodcutting XP and Logs.
- *
- * Life-cycle:
- *   ALIVE  — full tree; player can interact with it
- *   STUMP  — just chopped; cannot be interacted with; respawns after RESPAWN_TIME seconds
- *
- * Rendered in isometric style: trunk + rounded canopy sitting above the tile.
- * The foot (anchor) point is the bottom-centre of the tile's diamond.
+ * A tree object whose alive/stump state is driven entirely by the server.
+ * The client never runs respawn timers or chop logic — it is a pure renderer
+ * of server-authoritative state.
  */
 public class Tree extends Entity {
 
     public enum State { ALIVE, STUMP }
 
-    /** Seconds before a stump regrows. */
-    private static final double RESPAWN_TIME = 12.0;
+    private State state;
 
-    private State  state;
-    private double respawnTimer;
+    private final String id;
 
-    public Tree(double x, double y) {
+    public Tree(String id, double x, double y) {
         super(x, y, Constants.TILE_SIZE, Constants.TILE_SIZE);
+        this.id    = id;
         this.state = State.ALIVE;
     }
 
-    // -----------------------------------------------------------------------
-    //  Logic
-    // -----------------------------------------------------------------------
+    public String getId() { return id; }
 
-    /** Must be called every frame. Ticks the respawn counter so stumps regrow. */
-    public void update(double deltaTime) {
-        if (state == State.STUMP) {
-            respawnTimer -= deltaTime;
-            if (respawnTimer <= 0) {
-                state = State.ALIVE;
-            }
-        }
+    public void setPosition(double x, double y) {
+        setX(x);
+        setY(y);
     }
 
-    /** Called by WoodcuttingSystem when the chop timer fires. */
-    public void chop() {
-        state        = State.STUMP;
-        respawnTimer = RESPAWN_TIME;
-    }
-
-    /** True only when the tree is alive and can be chopped. */
-    public boolean isAlive() { return state == State.ALIVE; }
+    // -----------------------------------------------------------------------
+    //  Visual state — set by server events only
+    // -----------------------------------------------------------------------
 
     /**
-     * True if the world-space point (px, py) falls inside this tree's tile bounding box.
-     * Stump tiles are intentionally not clickable.
+     * Set the visual state of this tree.
+     * {@code true} → full tree (alive).
+     * {@code false} → stump (chopped).
+     * No timers are started or modified.
      */
+    public void setAlive(boolean alive) {
+        state = alive ? State.ALIVE : State.STUMP;
+    }
+
+    /** Convenience alias for {@code setAlive(false)} — kept for WoodcuttingSystem compatibility. */
+    public void chop() {
+        setAlive(false);
+    }
+
+    /** Convenience alias for {@code setAlive(true)} — kept for addTree compatibility. */
+    public void respawn() {
+        setAlive(true);
+    }
+
+    public boolean isAlive() {
+        return state == State.ALIVE;
+    }
+
     public boolean containsPoint(int px, int py) {
         return state == State.ALIVE
                 && px >= x && px <= x + width
@@ -66,16 +68,14 @@ public class Tree extends Entity {
     }
 
     // -----------------------------------------------------------------------
-    //  Rendering — isometric
+    //  Rendering
     // -----------------------------------------------------------------------
 
     @Override
     public void render(Graphics g) {
-        // Iso position of tile top-left
         int isoX = IsoUtils.worldToIsoX(x, y);
         int isoY = IsoUtils.worldToIsoY(x, y);
 
-        // "Foot" = bottom-centre of the tile diamond (where the tree stands)
         int footX = isoX + IsoUtils.ISO_TILE_W / 2;
         int footY = isoY + IsoUtils.ISO_TILE_H;
 
@@ -87,7 +87,6 @@ public class Tree extends Entity {
     }
 
     private void renderAlive(Graphics g, int footX, int footY) {
-        // Trunk (brown rectangle rising from the ground)
         int trunkW = 8;
         int trunkH = 20;
         g.setColor(new Color(101, 67, 20));
@@ -95,39 +94,25 @@ public class Tree extends Entity {
         g.setColor(new Color(70, 45, 12));
         g.drawRect(footX - trunkW / 2, footY - trunkH, trunkW, trunkH);
 
-        // Canopy (oval above the trunk)
         int canopyW = 38;
         int canopyH = 28;
         int canopyX = footX - canopyW / 2;
-        int canopyY = footY - trunkH - canopyH + 8;   // slight overlap with trunk top
+        int canopyY = footY - trunkH - canopyH + 8;
 
         g.setColor(new Color(22, 100, 22));
         g.fillOval(canopyX, canopyY, canopyW, canopyH);
 
-        // Canopy highlight
         g.setColor(new Color(55, 150, 55));
         g.fillOval(canopyX + 7, canopyY + 4, canopyW / 2, canopyH / 2);
 
-        // Canopy outline
         g.setColor(new Color(0, 55, 0));
         g.drawOval(canopyX, canopyY, canopyW, canopyH);
     }
 
     private void renderStump(Graphics g, int footX, int footY) {
-        // Small brown stump
         g.setColor(new Color(90, 55, 18));
         g.fillRect(footX - 8, footY - 12, 16, 12);
         g.setColor(new Color(60, 38, 10));
         g.drawRect(footX - 8, footY - 12, 16, 12);
-
-        // Regrow progress bar below stump
-        double progress = 1.0 - (respawnTimer / RESPAWN_TIME);
-        int barW = IsoUtils.ISO_TILE_W / 2;
-        int barX = footX - barW / 2;
-        int barY = footY + 4;
-        g.setColor(new Color(0, 0, 0, 120));
-        g.fillRect(barX, barY, barW, 4);
-        g.setColor(new Color(80, 180, 80, 200));
-        g.fillRect(barX, barY, (int)(barW * progress), 4);
     }
 }

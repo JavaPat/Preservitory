@@ -1,0 +1,15 @@
+{
+  "name": "starter_map",
+  "width": 30,
+  "height": 24,
+  "tiles": [],
+  "objects": [
+    { "id": "tree", "x": 128, "y": 128 },
+    { "id": "tree", "x": 256, "y": 192 },
+    { "id": "tree", "x": 320, "y": 256 },
+    { "id": "rock", "x": 384, "y": 192 }
+  ],
+  "npcs": [
+    { "id": "guide", "x": 512, "y": 288, "name": "Guide", "shopkeeper": true }
+  ]
+}

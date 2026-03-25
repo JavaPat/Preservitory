@@ -59,7 +59,7 @@ public class CombatSystem {
      * Tick the combat timer.
      *
      * @return a CombatResult when a tick fires (null every other frame).
-     *         The caller must apply playerDmg to the enemy and enemyDmg to the player.
+     *         The caller sends playerDmg to the server and shows floating text.
      */
     public CombatResult update(Player player, double deltaTime) {
         if (!inCombat || targetEnemy == null) return null;
@@ -78,19 +78,23 @@ public class CombatSystem {
         return null;
     }
 
-    /** Roll a full attack exchange for one tick. */
+    /**
+     * Resolve one combat tick from the client's perspective.
+     *
+     * Only the player's outgoing damage is rolled here — this value is sent to
+     * the server which validates it and applies its own authoritative roll.
+     * The client uses it solely for responsive floating-text feedback.
+     *
+     * Enemy → player damage is NOT calculated locally; it arrives via
+     * PLAYER_HP messages from the server.
+     */
     private CombatResult resolveTick(Player player) {
         int playerDmg = rollDamage(
                 player.getAttackLevel(),
                 targetEnemy.getDefenceLevel(),
                 player.getStrengthLevel()
         );
-        int enemyDmg = rollDamage(
-                targetEnemy.getAttackLevel(),
-                player.getDefenceLevel(),
-                targetEnemy.getStrengthLevel()
-        );
-        return new CombatResult(playerDmg, enemyDmg);
+        return new CombatResult(playerDmg);
     }
 
     /**
@@ -126,18 +130,20 @@ public class CombatSystem {
     // -----------------------------------------------------------------------
 
     /**
-     * Holds the outcome of one combat tick.
+     * Holds the client-side outcome of one combat tick.
      *
-     * playerDmg = damage the player deals TO the enemy this tick (0 = miss)
-     * enemyDmg  = damage the enemy deals TO the player this tick (0 = miss)
+     * playerDmg = damage the player deals TO the enemy (used for floating text).
+     *             The server rolls its own authoritative value; this is for
+     *             immediate visual feedback only.
+     *
+     * Enemy damage to the player is server-authoritative and arrives via
+     * PLAYER_HP messages — it is not stored here.
      */
     public static class CombatResult {
         public final int playerDmg;
-        public final int enemyDmg;
 
-        public CombatResult(int playerDmg, int enemyDmg) {
+        public CombatResult(int playerDmg) {
             this.playerDmg = playerDmg;
-            this.enemyDmg  = enemyDmg;
         }
     }
 }
