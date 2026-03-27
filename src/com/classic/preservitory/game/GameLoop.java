@@ -1,6 +1,6 @@
 package com.classic.preservitory.game;
 
-import com.classic.preservitory.ui.GamePanel;
+import com.classic.preservitory.ui.panels.GamePanel;
 import com.classic.preservitory.util.Constants;
 
 /**

@@ -8,24 +8,32 @@ public class Constants {
 
     public static final String GAME_NAME = "Preservitory";
 
+    public static final int PORT = 5555;
+
+    public static final String LOCALHOST = "localhost";
+
+    public static final String GAME_VERSION = "1.0";
+
+    public static final String GAME_NAME_TO_LOWER = GAME_NAME.toLowerCase();
+
     // -----------------------------------------------------------------------
     //  Window / screen
     // -----------------------------------------------------------------------
 
-    public static final int SCREEN_WIDTH  = 800;
-    public static final int SCREEN_HEIGHT = 600;
+    public static final int SCREEN_WIDTH  = 765;
+    public static final int SCREEN_HEIGHT = 503;
 
     // -----------------------------------------------------------------------
     //  Layout: game viewport + right side panel
     //
     //  ┌──────────────────────────┬───────────────┐
     //  │   Viewport (game world)  │  Side panel   │
-    //  │   566 × 600 px           │  234 × 600 px │
+    //  │   512 × 503 px           │  253 × 503 px │
     //  └──────────────────────────┴───────────────┘
     // -----------------------------------------------------------------------
 
     /** Width of the scrollable game-world viewport. */
-    public static final int VIEWPORT_W = 566;
+    public static final int VIEWPORT_W = 512;
 
     /** Height of the game-world viewport (full screen height). */
     public static final int VIEWPORT_H = SCREEN_HEIGHT;
@@ -34,7 +42,7 @@ public class Constants {
     public static final int PANEL_X = VIEWPORT_W;
 
     /** Width of the right side panel. */
-    public static final int PANEL_W = SCREEN_WIDTH - VIEWPORT_W;   // 234
+    public static final int PANEL_W = SCREEN_WIDTH - VIEWPORT_W;   // 253
 
     // -----------------------------------------------------------------------
     //  World / map dimensions

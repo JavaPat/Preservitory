@@ -1,45 +1,67 @@
 package com.classic.preservitory.game;
 
-import com.classic.preservitory.ui.GamePanel;
+import com.classic.preservitory.cache.CacheDownloader;
+import com.classic.preservitory.ui.panels.GamePanel;
+import com.classic.preservitory.ui.screens.LoadingScreen;
 import com.classic.preservitory.util.Constants;
 
 import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 
-/**
- * Bootstraps the game: creates the Swing window, attaches the GamePanel,
- * and starts the game loop.
- *
- * All Swing work is posted to the Event Dispatch Thread (EDT) via
- * SwingUtilities.invokeLater() as required by Swing's threading rules.
- */
 public class Game {
 
     private JFrame    window;
     private GamePanel panel;
 
-    /** Create the window and start everything. Call this from Main. */
     public void start() {
         SwingUtilities.invokeLater(() -> {
-            panel  = new GamePanel();
-            window = buildWindow(panel);
+            LoadingScreen loadingScreen = new LoadingScreen();
+            window = buildWindow(loadingScreen);
             window.setVisible(true);
-            panel.startGameLoop();
+
+            Thread cacheThread = new Thread(() -> {
+                CacheDownloader.init((percent, status) ->
+                    SwingUtilities.invokeLater(() -> loadingScreen.setProgress(percent, status))
+                );
+
+                SwingUtilities.invokeLater(() -> {
+                    panel = new GamePanel();
+                    panel.setLoginSuccessListener(this::setUsername);
+                    panel.setDisconnectListener(this::resetTitle);
+                    window.getContentPane().removeAll();
+                    window.getContentPane().add(panel);
+                    window.pack();
+                    panel.requestFocusInWindow();
+                    panel.startGameLoop();
+                });
+            }, "cache-loader");
+
+            cacheThread.setDaemon(true);
+            cacheThread.start();
         });
     }
 
-    /** Build and configure the JFrame. */
-    private JFrame buildWindow(GamePanel gamePanel) {
-        JFrame frame = new JFrame(Constants.GAME_NAME);
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setResizable(false);
-        frame.add(gamePanel);
-        frame.pack(); // Size the frame to fit the panel's preferred size
-        frame.setLocationRelativeTo(null); // Center on screen
-        return frame;
+    public void setUsername(String username) {
+        SwingUtilities.invokeLater(() ->
+            window.setTitle(Constants.GAME_NAME + " - Logged in as " + username)
+        );
     }
 
-    // --- Getters (useful for future expansion) ---
+    public void resetTitle() {
+        SwingUtilities.invokeLater(() ->
+            window.setTitle(Constants.GAME_NAME + " - Version " + Constants.GAME_VERSION)
+        );
+    }
+
+    private JFrame buildWindow(java.awt.Component content) {
+        JFrame frame = new JFrame(Constants.GAME_NAME + " - Version " + Constants.GAME_VERSION);
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setResizable(false);
+        frame.add(content);
+        frame.pack();
+        frame.setLocationRelativeTo(null);
+        return frame;
+    }
 
     public JFrame    getWindow() { return window; }
     public GamePanel getPanel()  { return panel;  }

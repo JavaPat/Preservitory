@@ -1,4 +1,4 @@
-package com.classic.preservitory.ui;
+package com.classic.preservitory.ui.overlays;
 
 import java.awt.Color;
 
@@ -30,14 +30,14 @@ public class FloatingText {
     //  Fields  (package-visible so GamePanel can read them without getters)
     // -----------------------------------------------------------------------
 
-    double       x, y;
-    final String text;
-    final Color  color;
-    float        alpha;
+    public double x, y;
+    public final String text;
+    public final Color color;
+    public float alpha;
 
     private double timer;
 
-    private static final double LIFETIME    = 1.2;
+    private static final double LIFETIME = 1.2;
     private static final double FLOAT_SPEED = 32.0;
 
     // -----------------------------------------------------------------------

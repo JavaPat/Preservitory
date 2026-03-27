@@ -10,18 +10,8 @@ import com.classic.preservitory.world.objects.Tree;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
-/**
- * Single source of truth for all server-synced world objects on the client.
- *
- * Responsibilities:
- *   - Trees: full sync (TREES) + delta updates (TREE_ADD / TREE_REMOVE)
- *   - Rocks: full sync (ROCKS) + delta updates (ROCK_ADD / ROCK_REMOVE)
- *   - NPCs:  full sync (NPCS — future)
- *
- * The client NEVER creates objects locally.  All state arrives from the server.
- * No timers, no game logic — pure data + query surface for the renderer.
- */
 public class ClientWorld {
 
     private final ConcurrentHashMap<String, Tree>  trees   = new ConcurrentHashMap<>();
@@ -29,58 +19,75 @@ public class ClientWorld {
     private final ConcurrentHashMap<String, Enemy> enemies = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Loot>  loot    = new ConcurrentHashMap<>();
 
-    // Insertion-order map so NPCs render in a stable, predictable sequence.
     private final LinkedHashMap<String, NPC> npcs = new LinkedHashMap<>();
 
+    private Consumer<DamageEvent> damageListener;
+
+    public void setDamageListener(java.util.function.Consumer<DamageEvent> listener) {
+        this.damageListener = listener;
+    }
+
+    public void handleDamage(double x, double y, int amount) {
+        if (damageListener != null) {
+            damageListener.accept(new DamageEvent(x, y, amount));
+        }
+    }
+
+    // ✅ NEW: damage event
+    public static class DamageEvent {
+        public final double x;
+        public final double y;
+        public final int amount;
+
+        public DamageEvent(double x, double y, int amount) {
+            this.x = x;
+            this.y = y;
+            this.amount = amount;
+        }
+    }
+
     // -----------------------------------------------------------------------
-    //  Trees — full state sync
+    //  Trees
     // -----------------------------------------------------------------------
 
-    /** Replace the entire local tree map with the server's authoritative state. */
-    public void updateTrees(Map<String, int[]> data) {
-        // Trees absent from the snapshot are dead — mark ONLY if currently alive
-        // so no stump visual is ever reset mid-countdown.
+    public void updateTrees(Map<String, ObjectStateData> data) {
         for (Map.Entry<String, Tree> entry : trees.entrySet()) {
             if (!data.containsKey(entry.getKey()) && entry.getValue().isAlive()) {
                 entry.getValue().setAlive(false);
             }
         }
-        // Apply snapshot — create missing entries, revive existing ones.
-        for (Map.Entry<String, int[]> entry : data.entrySet()) {
+
+        for (Map.Entry<String, ObjectStateData> entry : data.entrySet()) {
             String id  = entry.getKey();
-            int[]  pos = entry.getValue();
-            Tree   t   = trees.get(id);
+            ObjectStateData state = entry.getValue();
+
+            Tree t = trees.get(id);
             if (t == null) {
-                t = new Tree(id, pos[0], pos[1]);
+                t = new Tree(id, state.typeId, state.x, state.y);
                 trees.put(id, t);
             } else {
-                t.setPosition(pos[0], pos[1]);
+                t.setPosition(state.x, state.y);
             }
             t.setAlive(true);
         }
-        System.out.println("[ClientWorld] Full tree sync: " + data.size() + " trees");
     }
 
-    // -----------------------------------------------------------------------
-    //  Trees — delta updates
-    // -----------------------------------------------------------------------
-
-    /** Server confirms a tree was chopped — show stump. */
     public void chopTree(String id) {
         Tree t = trees.get(id);
         if (t != null) t.setAlive(false);
     }
 
-    /** Server confirms a tree respawned — restore or create it. Parts = [id, x, y]. */
     public void addTree(String[] parts) {
-        if (parts.length != 3) return;
+        if (parts.length != 4) return;
         try {
             String id = parts[0];
-            int    x  = Integer.parseInt(parts[1]);
-            int    y  = Integer.parseInt(parts[2]);
-            Tree   t  = trees.get(id);
+            String typeId = parts[1];
+            int x = Integer.parseInt(parts[2]);
+            int y = Integer.parseInt(parts[3]);
+
+            Tree t = trees.get(id);
             if (t == null) {
-                trees.put(id, new Tree(id, x, y));
+                trees.put(id, new Tree(id, typeId, x, y));
             } else {
                 t.setPosition(x, y);
                 t.setAlive(true);
@@ -89,51 +96,47 @@ public class ClientWorld {
     }
 
     // -----------------------------------------------------------------------
-    //  Rocks — full state sync
+    //  Rocks
     // -----------------------------------------------------------------------
 
-    /** Replace the entire local rock map with the server's authoritative state. */
-    public void updateRocks(Map<String, int[]> data) {
+    public void updateRocks(Map<String, ObjectStateData> data) {
         for (Map.Entry<String, Rock> entry : rocks.entrySet()) {
             if (!data.containsKey(entry.getKey()) && entry.getValue().isSolid()) {
                 entry.getValue().setAlive(false);
             }
         }
-        for (Map.Entry<String, int[]> entry : data.entrySet()) {
+
+        for (Map.Entry<String, ObjectStateData> entry : data.entrySet()) {
             String id  = entry.getKey();
-            int[]  pos = entry.getValue();
-            Rock   r   = rocks.get(id);
+            ObjectStateData state = entry.getValue();
+
+            Rock r = rocks.get(id);
             if (r == null) {
-                r = new Rock(id, pos[0], pos[1]);
+                r = new Rock(id, state.typeId, state.x, state.y);
                 rocks.put(id, r);
             } else {
-                r.setPosition(pos[0], pos[1]);
+                r.setPosition(state.x, state.y);
             }
             r.setAlive(true);
         }
-        System.out.println("[ClientWorld] Full rock sync: " + data.size() + " rocks");
     }
 
-    // -----------------------------------------------------------------------
-    //  Rocks — delta updates
-    // -----------------------------------------------------------------------
-
-    /** Server confirms a rock was mined — show depleted state. */
     public void mineRock(String id) {
         Rock r = rocks.get(id);
         if (r != null) r.setAlive(false);
     }
 
-    /** Server confirms a rock respawned — restore or create it. Parts = [id, x, y]. */
     public void addRock(String[] parts) {
-        if (parts.length != 3) return;
+        if (parts.length != 4) return;
         try {
             String id = parts[0];
-            int    x  = Integer.parseInt(parts[1]);
-            int    y  = Integer.parseInt(parts[2]);
-            Rock   r  = rocks.get(id);
+            String typeId = parts[1];
+            int x = Integer.parseInt(parts[2]);
+            int y = Integer.parseInt(parts[3]);
+
+            Rock r = rocks.get(id);
             if (r == null) {
-                rocks.put(id, new Rock(id, x, y));
+                rocks.put(id, new Rock(id, typeId, x, y));
             } else {
                 r.setPosition(x, y);
                 r.setAlive(true);
@@ -142,160 +145,129 @@ public class ClientWorld {
     }
 
     // -----------------------------------------------------------------------
-    //  Enemies — full state sync (called when server sends ENEMIES message)
+    //  Enemies (FIXED)
     // -----------------------------------------------------------------------
 
-    /**
-     * Replace local enemy state with the server's authoritative snapshot.
-     *
-     * Enemies absent from the snapshot are dead — mark them so they stop
-     * rendering.  Enemies present are alive — create or update them.
-     * The client never moves enemies or runs respawn timers.
-     */
     public void updateEnemies(Map<String, EnemyData> data) {
-        // Enemies missing from the snapshot are dead
+        // Mark missing enemies as dead
         for (Map.Entry<String, Enemy> entry : enemies.entrySet()) {
             if (!data.containsKey(entry.getKey())) {
                 entry.getValue().setHp(0);
             }
         }
-        // Apply snapshot
+
         for (Map.Entry<String, EnemyData> entry : data.entrySet()) {
-            String    id = entry.getKey();
-            EnemyData d  = entry.getValue();
-            Enemy     e  = enemies.get(id);
+            String id = entry.getKey();
+            EnemyData d = entry.getValue();
+
+            Enemy e = enemies.get(id);
+
             if (e == null) {
                 Goblin g = new Goblin(d.x, d.y);
                 g.setId(id);
                 enemies.put(id, g);
                 e = g;
             }
-            e.setHp(d.hp);
+
+            int oldHp = e.getHp();
+            int newHp = d.hp;
+
+            // ✅ DAMAGE DETECTION
+            if (newHp < oldHp) {
+                int damage = oldHp - newHp;
+
+                if (damageListener != null) {
+                    damageListener.accept(
+                            new DamageEvent(
+                                    e.getCenterX(),
+                                    e.getY() - 4,
+                                    damage
+                            )
+                    );
+                }
+            }
+
+            e.setHp(newHp);
         }
     }
 
     // -----------------------------------------------------------------------
-    //  NPCs — full state sync (called when server sends NPCS message)
+    //  NPCs
     // -----------------------------------------------------------------------
 
-    /**
-     * Replace the entire NPC map with the server's authoritative state.
-     *
-     * NPC objects are constructed here from typed {@link NPCData} records —
-     * no NPC is ever created anywhere else on the client.
-     */
     public void updateNpcs(Map<String, NPCData> data) {
         npcs.clear();
         for (Map.Entry<String, NPCData> entry : data.entrySet()) {
             NPCData d = entry.getValue();
-            npcs.put(entry.getKey(), new NPC(d.x, d.y, d.name, d.shopkeeper));
+            NPC npc = new NPC(d.x, d.y, d.name, d.shopkeeper);
+            npc.setId(d.id);
+            npcs.put(entry.getKey(), npc);
         }
-        System.out.println("[ClientWorld] Full NPC sync: " + npcs.size() + " NPCs");
     }
 
     // -----------------------------------------------------------------------
-    //  Queries — trees
+    //  Loot
     // -----------------------------------------------------------------------
 
-    public Collection<Tree> getTrees() {
-        return Collections.unmodifiableCollection(trees.values());
-    }
-
-    public Tree getTreeAt(int px, int py) {
-        for (Tree t : trees.values()) {
-            if (t.containsPoint(px, py)) return t;
-        }
-        return null;
-    }
-
-    // -----------------------------------------------------------------------
-    //  Queries — rocks
-    // -----------------------------------------------------------------------
-
-    public Collection<Rock> getRocks() {
-        return Collections.unmodifiableCollection(rocks.values());
-    }
-
-    public Rock getRockAt(int px, int py) {
-        for (Rock r : rocks.values()) {
-            if (r.containsPoint(px, py)) return r;
-        }
-        return null;
-    }
-
-    // -----------------------------------------------------------------------
-    //  Queries — enemies
-    // -----------------------------------------------------------------------
-
-    public Collection<Enemy> getEnemies() {
-        return Collections.unmodifiableCollection(enemies.values());
-    }
-
-    public Enemy getEnemyAt(int px, int py) {
-        for (Enemy e : enemies.values()) {
-            if (e.containsPoint(px, py)) return e;
-        }
-        return null;
-    }
-
-    // -----------------------------------------------------------------------
-    //  Queries — NPCs
-    // -----------------------------------------------------------------------
-
-    public Collection<NPC> getNpcs() {
-        return Collections.unmodifiableCollection(npcs.values());
-    }
-
-    public NPC getNpcAt(int px, int py) {
-        for (NPC n : npcs.values()) {
-            if (n.containsPoint(px, py)) return n;
-        }
-        return null;
-    }
-
-    // -----------------------------------------------------------------------
-    //  Loot — full state sync + delta updates
-    // -----------------------------------------------------------------------
-
-    /** Replace the entire loot map with the server's authoritative state. */
     public void updateLoot(Map<String, LootData> data) {
         loot.clear();
         for (Map.Entry<String, LootData> entry : data.entrySet()) {
             LootData d = entry.getValue();
             loot.put(d.id, new Loot(d.id, d.x, d.y, d.itemName, d.count));
         }
-        System.out.println("[ClientWorld] Full loot sync: " + data.size() + " items");
     }
 
-    /** Server spawned a new loot item — create it. */
     public void addLoot(LootData d) {
         loot.put(d.id, new Loot(d.id, d.x, d.y, d.itemName, d.count));
     }
 
-    /** Server removed a loot item (picked up). */
     public void removeLoot(String id) {
         loot.remove(id);
     }
 
-    public Collection<Loot> getLoot() {
-        return Collections.unmodifiableCollection(loot.values());
+    // -----------------------------------------------------------------------
+    //  Queries
+    // -----------------------------------------------------------------------
+
+    public Collection<Tree> getTrees() { return Collections.unmodifiableCollection(trees.values()); }
+    public Collection<Rock> getRocks() { return Collections.unmodifiableCollection(rocks.values()); }
+    public Collection<Enemy> getEnemies() { return Collections.unmodifiableCollection(enemies.values()); }
+    public Collection<NPC> getNpcs() { return Collections.unmodifiableCollection(npcs.values()); }
+    public Collection<Loot> getLoot() { return Collections.unmodifiableCollection(loot.values()); }
+
+    public Tree getTreeAt(int px, int py) {
+        for (Tree t : trees.values()) if (t.containsPoint(px, py)) return t;
+        return null;
+    }
+
+    public Rock getRockAt(int px, int py) {
+        for (Rock r : rocks.values()) if (r.containsPoint(px, py)) return r;
+        return null;
+    }
+
+    public Enemy getEnemyAt(int px, int py) {
+        for (Enemy e : enemies.values()) if (e.containsPoint(px, py)) return e;
+        return null;
+    }
+
+    public NPC getNpcAt(int px, int py) {
+        for (NPC n : npcs.values()) if (n.containsPoint(px, py)) return n;
+        return null;
+    }
+
+    public NPC getNpc(String id) {
+        return npcs.get(id);
     }
 
     public Loot getLootAt(int px, int py) {
-        for (Loot l : loot.values()) {
-            if (l.containsPoint(px, py)) return l;
-        }
+        for (Loot l : loot.values()) if (l.containsPoint(px, py)) return l;
         return null;
     }
 
     // -----------------------------------------------------------------------
-    //  Pathfinding — combined obstacle check
+    //  Pathfinding
     // -----------------------------------------------------------------------
 
-    /**
-     * Returns {@code true} if an alive tree or solid rock occupies the given
-     * tile column/row.  Used by Pathfinding as an injected walkability predicate.
-     */
     public boolean isBlocked(int col, int row) {
         for (Tree t : trees.values()) {
             if (t.isAlive()
@@ -304,6 +276,7 @@ public class ClientWorld {
                 return true;
             }
         }
+
         for (Rock r : rocks.values()) {
             if (r.isSolid()
                     && (int)(r.getX() / Constants.TILE_SIZE) == col
@@ -311,6 +284,7 @@ public class ClientWorld {
                 return true;
             }
         }
+
         return false;
     }
 }

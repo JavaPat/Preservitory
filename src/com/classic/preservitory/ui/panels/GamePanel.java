@@ -1,4 +1,4 @@
-package com.classic.preservitory.ui;
+package com.classic.preservitory.ui.panels;
 
 import com.classic.preservitory.client.world.ClientWorld;
 import com.classic.preservitory.entity.Animation;
@@ -17,6 +17,9 @@ import com.classic.preservitory.system.MovementSystem;
 import com.classic.preservitory.system.Pathfinding;
 import com.classic.preservitory.system.SoundSystem;
 import com.classic.preservitory.system.WoodcuttingSystem;
+import com.classic.preservitory.ui.framework.assets.AssetManager;
+import com.classic.preservitory.ui.overlays.ChatBox;
+import com.classic.preservitory.ui.overlays.FloatingText;
 import com.classic.preservitory.util.Constants;
 import com.classic.preservitory.util.IsoUtils;
 import com.classic.preservitory.world.World;
@@ -36,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -60,9 +64,8 @@ import java.util.Map;
  *   5. Ground → pathfind there; direct movement fallback if no path
  *
  * === Keyboard shortcuts ===
- *   S — save game        L — load game
- *   D — toggle debug     M — toggle sound
- *   Escape — close UI
+ *   Enter — chat         D — toggle debug
+ *   M — toggle sound     Escape — close UI
  *
  * === Camera ===
  *   {@code cameraOffsetX/Y} track the top-left world-space pixel that maps to
@@ -116,7 +119,7 @@ public class GamePanel extends JPanel {
     //  Multiplayer networking
     // -----------------------------------------------------------------------
 
-    /** Manages the TCP connection to the game server (no-op if offline). */
+    /** Manages the TCP connection to the game server. */
     private final ClientConnection clientConnection = new ClientConnection();
 
     /** ✅ NEW: holds server-side synced world data */
@@ -156,6 +159,10 @@ public class GamePanel extends JPanel {
     /** All live floating-text labels (damage, XP, loot). */
     private final List<FloatingText> floatingTexts = new ArrayList<>();
     private boolean deathHandled;
+    private boolean shopOpen;
+    private boolean shopOpenAfterDialogue;
+    private final LinkedHashMap<String, Integer> shopStockPrices = new LinkedHashMap<>();
+    private final LinkedHashMap<String, Integer> shopSellPrices = new LinkedHashMap<>();
 
     // FPS tracking
     private int  fpsCounter;
@@ -178,13 +185,42 @@ public class GamePanel extends JPanel {
 
     /** Accumulates characters typed by the player until ENTER is pressed. */
     private final StringBuilder chatInput = new StringBuilder();
+    private boolean authRequired = true;
+    private String currentAccountName = "";
+    private com.classic.preservitory.ui.screens.LoginScreen loginScreen;
+    private java.util.function.Consumer<String> loginSuccessListener;
+    private Runnable disconnectListener;
 
+    public void setLoginSuccessListener(java.util.function.Consumer<String> listener) {
+        this.loginSuccessListener = listener;
+    }
+
+    public void setDisconnectListener(Runnable listener) {
+        this.disconnectListener = listener;
+    }
 
     // -----------------------------------------------------------------------
     //  Construction
     // -----------------------------------------------------------------------
 
     public GamePanel() {
+
+        AssetManager.load();
+
+        loginScreen = new com.classic.preservitory.ui.screens.LoginScreen(
+                Constants.SCREEN_WIDTH, Constants.SCREEN_HEIGHT,
+                (u, p) -> {
+                    if (!clientConnection.isConnected()) { loginScreen.setStatus("Server offline."); return; }
+                    loginScreen.setStatus("Logging in...");
+                    clientConnection.sendLogin(u, p);
+                },
+                (u, p) -> {
+                    if (!clientConnection.isConnected()) { loginScreen.setStatus("Server offline."); return; }
+                    loginScreen.setStatus("Registering...");
+                    clientConnection.sendRegister(u, p);
+                }
+        );
+
         setPreferredSize(new Dimension(Constants.SCREEN_WIDTH, Constants.SCREEN_HEIGHT));
         setBackground(Color.BLACK);
         setFocusable(true);
@@ -205,19 +241,50 @@ public class GamePanel extends JPanel {
         gameLoop          = new GameLoop(this);
 
         clientConnection.setListener(new ClientConnection.Listener() {
-            @Override public void onConnected(String assignedId) {
+
+            @Override
+            public void onConnected(String assignedId) {
                 player.setId(assignedId);
-                chatBox.post("Connected as " + assignedId + ".  Press ENTER to chat.",
-                        ChatBox.COLOR_SYSTEM);
+                deathHandled  = false;
+                authRequired  = true;
+                currentAccountName = "";
+                loginScreen.reset();
+                chatBox.post("Connected. Please log in.", ChatBox.COLOR_SYSTEM);
             }
 
-            @Override public void onDisconnected() {
-                chatBox.post("Disconnected from server.", ChatBox.COLOR_SYSTEM);
+            @Override
+            public void onDisconnected() {
+                stopAllActivities();
+                dialogueSystem.close();
+                gameState = GameState.PLAYING;
+
+                shopOpen = false;
+                shopOpenAfterDialogue = false;
+                shopStockPrices.clear();
+                shopSellPrices.clear();
+
+                authRequired = true;
+                currentAccountName = "";
+                loginScreen.setStatus("Server offline. Reconnecting...");
+
+                chatBox.post("Disconnected from server. Reconnecting...", ChatBox.COLOR_SYSTEM);
+                showMessage("Server offline.");
+                if (disconnectListener != null) disconnectListener.run();
             }
 
-            @Override public void onChat(String fromId, String message) {
-                if (fromId.equals(player.getId())) return;
-                chatBox.post("[" + fromId + "]: " + message, ChatBox.COLOR_CHAT);
+            @Override
+            public void onChat(String username, String role, String message) {
+
+                String prefix = "";
+
+                switch (role) {
+                    case "MODERATOR": prefix = "[MOD] "; break;
+                    case "ADMIN": prefix = "[ADMIN] "; break;
+                    case "OWNER": prefix = "[OWNER] "; break;
+                    case "DEVELOPER": prefix = "[DEV] "; break;
+                }
+
+                chatBox.post(prefix + username + ": " + message, ChatBox.COLOR_CHAT);
             }
         });
 
@@ -233,11 +300,20 @@ public class GamePanel extends JPanel {
 
         clientConnection.setNpcUpdateListener(clientWorld::updateNpcs);
         clientConnection.setEnemyUpdateListener(clientWorld::updateEnemies);
+        clientWorld.setDamageListener(event ->
+                spawnDamage(event.x, event.y, event.amount, false));
+        clientConnection.setDamageListener(damage ->
+                clientWorld.handleDamage(damage[0], damage[1], damage[2]));
 
-        clientConnection.setPlayerHpListener(newHp -> {
-            int delta = player.getHp() - newHp;
+        clientConnection.setPlayerHpListener(hpState -> {
+            int oldHp = player.getHp();
+            int newHp = hpState[0];
+            if (hpState.length >= 2 && hpState[1] > 0) {
+                player.setMaxHp(hpState[1]);
+            }
             player.setHp(newHp);
             if (newHp > 0) deathHandled = false;
+            int delta = oldHp - newHp;
             if (delta > 0) spawnDamage(player.getCenterX(), player.getY() - 4, delta, true);
             if (player.isDead()) handlePlayerDeath();
         });
@@ -246,6 +322,7 @@ public class GamePanel extends JPanel {
         clientConnection.setLootAddListener(clientWorld::addLoot);
         clientConnection.setLootRemoveListener(clientWorld::removeLoot);
         clientConnection.setInventoryListener(inv -> player.applyInventoryUpdate(inv));
+        clientConnection.setSkillSnapshotListener(player::applySkillSnapshot);
 
         clientConnection.setSkillXpListener(parts -> {
             try {
@@ -253,6 +330,37 @@ public class GamePanel extends JPanel {
                 int xp = Integer.parseInt(parts[1]);
                 player.getSkillSystem().addXp(skillName, xp);
             } catch (NumberFormatException ignored) {}
+        });
+        clientConnection.setDialogueListener(dialogue -> {
+            NPC npc = clientWorld.getNpc(dialogue.npcId);
+            if (npc == null) npc = activeNPC;
+            if (npc == null) return;
+
+            dialogueSystem.open(npc, dialogue.lines);
+            gameState = GameState.IN_DIALOGUE;
+            shopOpenAfterDialogue = dialogue.openShop;
+        });
+        clientConnection.setShopListener(shop -> {
+            shopStockPrices.clear();
+            shopStockPrices.putAll(shop.stockPrices);
+            shopSellPrices.clear();
+            shopSellPrices.putAll(shop.sellPrices);
+        });
+        clientConnection.setAuthSuccessListener(username -> {
+            authRequired  = false;
+            currentAccountName = username;
+            isTypingChat  = false;
+            chatInput.setLength(0);
+            loginScreen.reset();
+            chatBox.post("Logged in as " + username + ".", ChatBox.COLOR_SYSTEM);
+            showMessage("Authenticated as " + username + ".");
+            if (loginSuccessListener != null) loginSuccessListener.accept(username);
+        });
+        clientConnection.setAuthFailureListener(message -> {
+            authRequired = true;
+            loginScreen.setStatus(message);
+            chatBox.post(message, ChatBox.COLOR_SYSTEM);
+            showMessage(message);
         });
 
         addMouseListener(new MouseAdapter() {
@@ -265,6 +373,7 @@ public class GamePanel extends JPanel {
             @Override public void mouseMoved(MouseEvent e) {
                 hoverX = e.getX();
                 hoverY = e.getY();
+                if (authRequired) { loginScreen.handleMouseMove(e.getX(), e.getY()); return; }
                 rightPanel.handleMouseMove(e.getX(), e.getY());
                 updateCursorForHover(e.getX(), e.getY());
             }
@@ -291,6 +400,10 @@ public class GamePanel extends JPanel {
     // -----------------------------------------------------------------------
 
     private void handleKey(int keyCode) {
+        if (authRequired) {
+            loginScreen.handleKey(keyCode);
+            return;
+        }
 
         // ----------------------------------------------------------------
         //  Chat-input mode — intercept all keys so game shortcuts don't
@@ -329,14 +442,6 @@ public class GamePanel extends JPanel {
                 }
                 break;
 
-            case KeyEvent.VK_S:
-                showMessage("Local save is disabled in server-authoritative mode.");
-                break;
-
-            case KeyEvent.VK_L:
-                showMessage("Local load is disabled in server-authoritative mode.");
-                break;
-
             case KeyEvent.VK_D:
                 debugMode = !debugMode;
                 break;
@@ -347,6 +452,13 @@ public class GamePanel extends JPanel {
                 break;
 
             case KeyEvent.VK_ESCAPE:
+                if (shopOpen) {
+                    shopOpen = false;
+                    shopOpenAfterDialogue = false;
+                    clientConnection.sendShopClose();
+                    showMessage("Shop closed.");
+                    break;
+                }
                 if (gameState == GameState.IN_DIALOGUE) {
                     dialogueSystem.close();
                     gameState = GameState.PLAYING;
@@ -361,6 +473,10 @@ public class GamePanel extends JPanel {
      * handled separately in {@link #handleKey(int)}.
      */
     private void handleCharTyped(char c) {
+        if (authRequired) {
+            loginScreen.handleChar(c);
+            return;
+        }
         if (!isTypingChat) return;
         // Accept printable ASCII only; ignore control chars (Enter=\n, BS=\b…)
         if (c < 32 || c > 126) return;
@@ -376,6 +492,11 @@ public class GamePanel extends JPanel {
         isTypingChat = false;
         chatInput.setLength(0);
 
+        if (raw.startsWith("/")) {
+            clientConnection.sendChatMessage(raw);
+            return;
+        }
+
         // Run the message through the filter before doing anything with it
         String msg = com.classic.preservitory.util.ChatFilter.filter(raw);
         if (msg == null) {
@@ -384,8 +505,11 @@ public class GamePanel extends JPanel {
             return;
         }
 
-        // Show immediately in our own chat box (no round-trip wait)
-        chatBox.post("[" + player.getId() + "]: " + msg, ChatBox.COLOR_CHAT);
+        if (!clientConnection.isConnected()) {
+            chatBox.post("Server offline. Message not sent.", ChatBox.COLOR_SYSTEM);
+            return;
+        }
+
         // Send cleaned text to server — server broadcasts to all other clients
         clientConnection.sendChatMessage(msg);
     }
@@ -395,6 +519,10 @@ public class GamePanel extends JPanel {
     // -----------------------------------------------------------------------
 
     private void handleClick(int cx, int cy) {
+        if (authRequired) {
+            loginScreen.handleClick(cx, cy);
+            return;
+        }
         // Ignore world clicks while the player is composing a chat message
         // (right-panel clicks are still intentional and allowed through)
         if (isTypingChat && cx < Constants.PANEL_X) return;
@@ -409,7 +537,27 @@ public class GamePanel extends JPanel {
 
         // Route right-panel clicks (tab switching, inventory hover, etc.)
         if (cx >= Constants.PANEL_X) {
+            if (shopOpen) {
+                String buyItem = rightPanel.getClickedShopItem(cx, cy, shopStockPrices);
+                if (buyItem != null) {
+                    clientConnection.sendBuy(buyItem);
+                    showMessage("Buy request sent: " + buyItem);
+                    return;
+                }
+
+                String sellItem = rightPanel.getClickedInventoryItem(cx, cy, player);
+                if (sellItem != null && shopSellPrices.containsKey(sellItem)) {
+                    clientConnection.sendSell(sellItem);
+                    showMessage("Sell request sent: " + sellItem);
+                    return;
+                }
+            }
             rightPanel.handleClick(cx, cy);
+            return;
+        }
+
+        if (!clientConnection.isConnected()) {
+            showMessage("Server offline. Start the server to play.");
             return;
         }
 
@@ -549,6 +697,11 @@ public class GamePanel extends JPanel {
 
         dialogueSystem.close();
         gameState = GameState.PLAYING;
+        if (shopOpenAfterDialogue) {
+            shopOpen = true;
+            shopOpenAfterDialogue = false;
+            showMessage("Shop opened. Use SKILLS tab to buy, INVENTORY to sell.");
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -562,7 +715,10 @@ public class GamePanel extends JPanel {
 
     /** Called once per frame by GameLoop. */
     public void update(double deltaTime) {
-        if (gameState == GameState.PLAYING) {
+        if (!clientConnection.isConnected() || authRequired) {
+            stopAllActivities();
+            player.getAnimation().setState(Animation.State.IDLE);
+        } else if (gameState == GameState.PLAYING) {
             movementSystem.update(player, mouseHandler, deltaTime);
             updateTreeInteraction(deltaTime);
             updateRockInteraction(deltaTime);
@@ -587,7 +743,9 @@ public class GamePanel extends JPanel {
         if (messageTimer > 0) messageTimer = Math.max(0, messageTimer - deltaTime);
 
         // ---- Multiplayer: send our position + sync remote players ----
-        clientConnection.sendPosition((int) player.getX(), (int) player.getY());
+        if (!authRequired) {
+            clientConnection.sendPosition((int) player.getX(), (int) player.getY());
+        }
         syncRemotePlayers(deltaTime);
 
         trackFps();
@@ -609,6 +767,22 @@ public class GamePanel extends JPanel {
         for (Map.Entry<String, int[]> entry : netSnapshot.entrySet()) {
             String id  = entry.getKey();
             int[]  pos = entry.getValue();
+
+            if (id.equals(player.getId())) {
+                double dx = Math.abs(player.getX() - pos[0]);
+                double dy = Math.abs(player.getY() - pos[1]);
+
+                // Only snap on server-forced teleport/respawn (> 4 tiles).
+                // Normal movement lag is < 1 tile — ignore it so the path isn't cleared.
+                if (dx > Constants.TILE_SIZE * 4 || dy > Constants.TILE_SIZE * 4) {
+                    player.setX(pos[0]);
+                    player.setY(pos[1]);
+                    movementSystem.clearPath();
+                    mouseHandler.clearTarget();
+                }
+
+                continue;
+            }
 
             RemotePlayer rp = remotePlayers.get(id);
             if (rp == null) {
@@ -690,10 +864,6 @@ public class GamePanel extends JPanel {
         if (activeTree != null) {
             clientConnection.sendChop(activeTree.getId());
         }
-        // Offline fallback: award XP locally when not connected to server
-        if (!clientConnection.isConnected()) {
-            player.getSkillSystem().addXp("woodcutting", WoodcuttingSystem.XP_PER_CHOP);
-        }
         woodcuttingSystem.stopChopping();
         activeTree = null;
         soundSystem.play(SoundSystem.Sound.CHOP);
@@ -722,26 +892,17 @@ public class GamePanel extends JPanel {
         String rockId = (activeRock != null) ? activeRock.getId() : null;
 
         if (rockId != null) clientConnection.sendMine(rockId);
-        // Offline fallback: award XP locally when not connected to server
-        if (!clientConnection.isConnected()) {
-            player.getSkillSystem().addXp("mining", MiningSystem.XP_PER_MINE);
-        }
         miningSystem.stopMining();
         activeRock = null;
         soundSystem.play(SoundSystem.Sound.MINE);
         showMessage("Mine request sent to server.");
     }
 
-    // Offline-only: simple timer for enemy counter-attacks when server is unavailable.
-    private double offlineEnemyAttackTimer = 0;
-    private static final double OFFLINE_ENEMY_TICK = 2.0; // seconds between enemy hits offline
-
     private void updateCombat(double deltaTime) {
         if (activeEnemy == null) return;
 
         if (!activeEnemy.isAlive()) {
             combatSystem.stopCombat();
-            offlineEnemyAttackTimer = 0;
             activeEnemy = null;
             return;
         }
@@ -749,37 +910,17 @@ public class GamePanel extends JPanel {
         if (isWithinInteractionRange(player, activeEnemy)) {
             if (!combatSystem.isInCombat()) {
                 combatSystem.startCombat(activeEnemy);
-                offlineEnemyAttackTimer = OFFLINE_ENEMY_TICK;
                 showMessage("You attack the " + activeEnemy.getName() + "!");
             }
             CombatSystem.CombatResult result = combatSystem.update(player, deltaTime);
             if (result != null) applyCombatResult(result);
-
-            // Offline fallback: enemy deals damage locally since no server is running.
-            if (!clientConnection.isConnected()) {
-                offlineEnemyAttackTimer -= deltaTime;
-                if (offlineEnemyAttackTimer <= 0) {
-                    offlineEnemyAttackTimer = OFFLINE_ENEMY_TICK;
-                    int enemyDmg = 1 + (int)(Math.random() * activeEnemy.getStrengthLevel());
-                    int newHp = Math.max(0, player.getHp() - enemyDmg);
-                    player.setHp(newHp);
-                    spawnDamage(player.getCenterX(), player.getY() - 4, enemyDmg, true);
-                    if (player.isDead()) handlePlayerDeath();
-                }
-            }
         }
     }
 
     private void applyCombatResult(CombatSystem.CombatResult result) {
         if (activeEnemy == null) return;
 
-        // Send attack request to server. Server rolls its own authoritative damage —
-        // the result.playerDmg value here is only used for immediate floating text.
-        clientConnection.sendAttack(activeEnemy.getId(), result.playerDmg);
-        spawnDamage(activeEnemy.getCenterX(), activeEnemy.getY() - 4, result.playerDmg, false);
-
-        // Enemy → player damage arrives via PLAYER_HP from the server (playerHpListener).
-        // No local HP mutation needed here — the server is authoritative.
+        clientConnection.sendAttack(activeEnemy.getId());
 
         soundSystem.play(SoundSystem.Sound.HIT);
         if (activeEnemy.isDead()) {
@@ -805,12 +946,8 @@ public class GamePanel extends JPanel {
     private void updateNPCInteraction() {
         if (activeNPC == null) return;
         if (distanceTo(player, activeNPC) <= Constants.TILE_SIZE * 1.6) {
-            String[] lines = {
-                    activeNPC.getName() + ": Interactions are server-authoritative.",
-                    "This client only renders server state and sends input."
-            };
-            dialogueSystem.open(activeNPC, lines);
-            gameState = GameState.IN_DIALOGUE;
+            String npcId = activeNPC.getId();
+            clientConnection.sendTalk(npcId);
             activeNPC = null;
         }
     }
@@ -877,7 +1014,9 @@ public class GamePanel extends JPanel {
 
         // Right panel — tab system with inventory / skills
         rightPanel.render(g2, player,
-                null,
+                shopOpen,
+                shopStockPrices,
+                shopSellPrices,
                 activeTree != null,
                 activeRock != null,
                 activeEnemy != null,
@@ -890,6 +1029,7 @@ public class GamePanel extends JPanel {
 
         // Full-screen overlays (screen space, rendered over the viewport only)
         if (gameState == GameState.IN_DIALOGUE) drawDialogueBox(g2);
+        if (authRequired) loginScreen.render(g2);
         // Messages, debug, FPS (screen space)
         drawActionMessage(g2);
         if (debugMode) drawDebugOverlay(g2);
@@ -1071,8 +1211,12 @@ public class GamePanel extends JPanel {
     private void drawFps(Graphics2D g) {
         g.setFont(new Font("Monospaced", Font.PLAIN, 11));
         g.setColor(new Color(180, 180, 180, 160));
-        g.drawString("FPS: " + displayedFps, 8, 14);
+        String label = currentAccountName.isEmpty()
+                ? "FPS: " + displayedFps
+                : "FPS: " + displayedFps + "  Account: " + currentAccountName;
+        g.drawString(label, 8, 14);
     }
+
 
     // -----------------------------------------------------------------------
     //  Debug overlay
@@ -1156,13 +1300,18 @@ public class GamePanel extends JPanel {
 
     private void renderFloatingTexts(Graphics2D g) {
         g.setFont(new Font("Monospaced", Font.BOLD, 13));
-        for (FloatingText ft : floatingTexts) {
+
+        List<FloatingText> snapshot = new ArrayList<>(floatingTexts); // ✅ COPY
+
+        for (FloatingText ft : snapshot) {
             int a = (int)(ft.alpha * 255);
             if (a <= 0) continue;
+
             g.setColor(new Color(0, 0, 0, Math.min(a, 180)));
             g.drawString(ft.text, (int)ft.x + 1, (int)ft.y + 1);
+
             g.setColor(new Color(ft.color.getRed(), ft.color.getGreen(),
-                                 ft.color.getBlue(), a));
+                    ft.color.getBlue(), a));
             g.drawString(ft.text, (int)ft.x, (int)ft.y);
         }
     }

@@ -18,12 +18,9 @@ public class WoodcuttingSystem {
     /** Seconds between chop completions. */
     private static final double CHOP_INTERVAL = 1.5;
 
-    /** XP awarded per successful chop. Public so GamePanel can show it in messages. */
-    public static final int XP_PER_CHOP = 25;
-
     private boolean chopping;
-    private double  timer;
-    private Tree    targetTree;
+    private double timer;
+    private Tree targetTree;
 
     // -----------------------------------------------------------------------
     //  State control
@@ -35,16 +32,16 @@ public class WoodcuttingSystem {
      */
     public void startChopping(Tree tree) {
         this.targetTree = tree;
-        this.chopping   = true;
-        this.timer      = CHOP_INTERVAL;
+        this.chopping = true;
+        this.timer = CHOP_INTERVAL;
     }
 
     /**
      * Abort chopping (e.g. player walked away or tree became a stump mid-chop).
      */
     public void stopChopping() {
-        chopping   = false;
-        timer      = 0;
+        chopping = false;
+        timer = 0;
         targetTree = null;
     }
 
@@ -80,7 +77,7 @@ public class WoodcuttingSystem {
     // -----------------------------------------------------------------------
 
     public boolean isChopping()    { return chopping; }
-    public Tree    getTargetTree() { return targetTree; }
+    public Tree getTargetTree() { return targetTree; }
 
     /**
      * How far through the current chop swing we are, as a 0.0–1.0 fraction.

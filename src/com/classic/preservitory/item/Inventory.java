@@ -81,7 +81,7 @@ public class Inventory {
         }
     }
 
-    /** Remove all items — used by SaveSystem before loading a save. */
+    /** Remove all items so a fresh authoritative inventory snapshot can be applied. */
     public void clear() {
         slots.clear();
     }

@@ -1,6 +1,8 @@
 package com.classic.preservitory.world.objects;
 
 import com.classic.preservitory.entity.Entity;
+import com.classic.preservitory.world.DefinitionLoader;
+import com.classic.preservitory.world.ObjectDefinition;
 import com.classic.preservitory.util.Constants;
 import com.classic.preservitory.util.IsoUtils;
 
@@ -19,14 +21,18 @@ public class Tree extends Entity {
     private State state;
 
     private final String id;
+    private final String typeId;
+    private static final java.util.Map<String, ObjectDefinition> DEFINITIONS = DefinitionLoader.loadAll();
 
-    public Tree(String id, double x, double y) {
-        super(x, y, Constants.TILE_SIZE, Constants.TILE_SIZE);
+    public Tree(String id, String typeId, double x, double y) {
+        super(x, y, widthFor(typeId), heightFor(typeId));
         this.id    = id;
+        this.typeId = typeId;
         this.state = State.ALIVE;
     }
 
     public String getId() { return id; }
+    public String getTypeId() { return typeId; }
 
     public void setPosition(double x, double y) {
         setX(x);
@@ -114,5 +120,15 @@ public class Tree extends Entity {
         g.fillRect(footX - 8, footY - 12, 16, 12);
         g.setColor(new Color(60, 38, 10));
         g.drawRect(footX - 8, footY - 12, 16, 12);
+    }
+
+    private static int widthFor(String typeId) {
+        ObjectDefinition def = DEFINITIONS.get(typeId);
+        return def != null ? def.width : Constants.TILE_SIZE;
+    }
+
+    private static int heightFor(String typeId) {
+        ObjectDefinition def = DEFINITIONS.get(typeId);
+        return def != null ? def.height : Constants.TILE_SIZE;
     }
 }

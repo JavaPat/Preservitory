@@ -115,6 +115,56 @@ public class Player extends Entity {
         hp = Math.max(0, Math.min(maxHp, value));
     }
 
+    public void setMaxHp(int value) {
+        maxHp = Math.max(1, value);
+        hp = Math.min(hp, maxHp);
+    }
+
+    public void setCombatLevels(int attackLevel, int strengthLevel, int defenceLevel) {
+        this.attackLevel = Math.max(1, attackLevel);
+        this.strengthLevel = Math.max(1, strengthLevel);
+        this.defenceLevel = Math.max(1, defenceLevel);
+    }
+
+    public void applySkillSnapshot(Map<String, int[]> skillSnapshot) {
+        if (skillSnapshot == null || skillSnapshot.isEmpty()) {
+            return;
+        }
+
+        int attackLevel = this.attackLevel;
+        int[] attack = skillSnapshot.get("attack");
+        if (attack != null && attack.length >= 2) {
+            attackLevel = attack[0];
+        }
+
+        int strengthLevel = this.strengthLevel;
+        int[] strength = skillSnapshot.get("strength");
+        if (strength != null && strength.length >= 2) {
+            strengthLevel = strength[0];
+        }
+
+        int defenceLevel = this.defenceLevel;
+        int[] defence = skillSnapshot.get("defence");
+        if (defence != null && defence.length >= 2) {
+            defenceLevel = defence[0];
+        }
+
+        setCombatLevels(attackLevel, strengthLevel, defenceLevel);
+
+        int[] hitpoints = skillSnapshot.get("hitpoints");
+        if (hitpoints != null && hitpoints.length >= 2) {
+            setMaxHp(Math.max(1, hitpoints[0] * 5));
+        }
+
+        for (Map.Entry<String, int[]> entry : skillSnapshot.entrySet()) {
+            int[] values = entry.getValue();
+            if (values == null || values.length < 2) {
+                continue;
+            }
+            skillSystem.applySnapshot(entry.getKey(), values[0], values[1]);
+        }
+    }
+
     /** True when HP has reached zero. */
     public boolean isDead() { return hp <= 0; }
 

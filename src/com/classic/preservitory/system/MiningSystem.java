@@ -13,12 +13,9 @@ public class MiningSystem {
     /** Seconds per mine swing. */
     private static final double MINE_INTERVAL = 2.0;
 
-    /** XP awarded per successful mine. Public for message formatting. */
-    public static final int XP_PER_MINE = 20;
-
     private boolean mining;
-    private double  timer;
-    private Rock    targetRock;
+    private double timer;
+    private Rock targetRock;
 
     // -----------------------------------------------------------------------
     //  State control
@@ -27,14 +24,14 @@ public class MiningSystem {
     /** Begin mining the given rock. Resets the swing timer. */
     public void startMining(Rock rock) {
         this.targetRock = rock;
-        this.mining     = true;
-        this.timer      = MINE_INTERVAL;
+        this.mining = true;
+        this.timer = MINE_INTERVAL;
     }
 
     /** Stop mining (player moved away or rock became depleted). */
     public void stopMining() {
-        mining     = false;
-        timer      = 0;
+        mining = false;
+        timer = 0;
         targetRock = null;
     }
 
@@ -65,8 +62,13 @@ public class MiningSystem {
     //  Getters
     // -----------------------------------------------------------------------
 
-    public boolean isMining()      { return mining; }
-    public Rock    getTargetRock() { return targetRock; }
+    public boolean isMining() {
+        return mining;
+    }
+
+    public Rock getTargetRock() {
+        return targetRock;
+    }
 
     /** 0.0–1.0 fraction through the current swing. For a progress bar. */
     public double getMineProgress() {

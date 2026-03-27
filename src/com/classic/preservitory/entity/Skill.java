@@ -61,7 +61,7 @@ public class Skill {
     }
 
     /**
-     * Directly set level and XP — used by SaveSystem when loading a save file.
+     * Directly set level and XP from an authoritative snapshot.
      * Does NOT trigger level-up events.
      */
     public void resetTo(int level, int xp) {

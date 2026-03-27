@@ -44,6 +44,13 @@ public class SkillSystem {
         return skills.get(skillName.toLowerCase());
     }
 
+    public void applySnapshot(String skillName, int level, int xp) {
+        Skill skill = skills.get(skillName.toLowerCase());
+        if (skill != null) {
+            skill.resetTo(level, xp);
+        }
+    }
+
     /** Read-only view of every registered skill in registration order. */
     public Map<String, Skill> getAllSkills() {
         return Collections.unmodifiableMap(skills);

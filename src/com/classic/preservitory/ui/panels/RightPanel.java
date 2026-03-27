@@ -1,13 +1,13 @@
-package com.classic.preservitory.ui;
+package com.classic.preservitory.ui.panels;
 
 import com.classic.preservitory.entity.Player;
 import com.classic.preservitory.entity.Skill;
 import com.classic.preservitory.item.Item;
-import com.classic.preservitory.quest.Quest;
 import com.classic.preservitory.util.Constants;
 
 import java.awt.*;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Draws and handles input for the fixed right-side panel.
@@ -16,7 +16,7 @@ import java.util.List;
  *   0  –  82 : Stats bar — HP progress bar + current activity label
  *   82 – 110 : Tab buttons — [INVENTORY] [SKILLS]
  *  110 – 520 : Tab content (inventory grid OR skills/combat stats)
- *  520 – 600 : Footer — quest status + keyboard shortcuts
+ *  520 – 600 : Footer — keyboard shortcuts
  *
  * === Tab system ===
  *   Only one tab is visible at a time.  Clicking a tab button switches to it.
@@ -71,6 +71,7 @@ public class RightPanel {
 
     private Tab activeTab  = Tab.INVENTORY;
     private int hoverSlot  = -1;   // inventory slot index under mouse, -1 = none
+    private int hoverShopRow = -1;
 
     // -----------------------------------------------------------------------
     //  Public API — input
@@ -104,12 +105,28 @@ public class RightPanel {
      */
     public void handleMouseMove(int sx, int sy) {
         hoverSlot = -1;
-        if (activeTab != Tab.INVENTORY) return;
+        hoverShopRow = -1;
         if (sy < CONTENT_Y || sy >= FOOTER_Y) return;
         if (sx < Constants.PANEL_X) return;
 
+        if (activeTab == Tab.SKILLS) {
+            int x = Constants.PANEL_X + 8;
+            int y = CONTENT_Y + 38;
+            int bw = Constants.PANEL_W - 16;
+            for (int row = 0; row < 20; row++) {
+                int rowTop = y + row * 22;
+                if (sx >= x && sx < x + bw && sy >= rowTop && sy < rowTop + 18) {
+                    hoverShopRow = row;
+                    return;
+                }
+            }
+            return;
+        }
+
+        if (activeTab != Tab.INVENTORY) return;
+
         int gridX = Constants.PANEL_X + (Constants.PANEL_W - INV_COLS * SLOT_STEP) / 2;
-        int gridY = CONTENT_Y + 20;
+        int gridY = CONTENT_Y + 30;
 
         for (int row = 0; row < INV_ROWS; row++) {
             for (int col = 0; col < INV_COLS; col++) {
@@ -124,6 +141,48 @@ public class RightPanel {
         }
     }
 
+    public String getClickedInventoryItem(int sx, int sy, Player player) {
+        if (sx < Constants.PANEL_X || sy < CONTENT_Y || sy >= FOOTER_Y) return null;
+
+        int gridX = Constants.PANEL_X + (Constants.PANEL_W - INV_COLS * SLOT_STEP) / 2;
+        int gridY = CONTENT_Y + 30;
+        List<Item> slots = player.getInventory().getSlots();
+
+        for (int row = 0; row < INV_ROWS; row++) {
+            for (int col = 0; col < INV_COLS; col++) {
+                int idx = row * INV_COLS + col;
+                if (idx >= slots.size()) return null;
+
+                int slotX = gridX + col * SLOT_STEP;
+                int slotY = gridY + row * SLOT_STEP;
+                if (sx >= slotX && sx < slotX + SLOT_SIZE
+                 && sy >= slotY && sy < slotY + SLOT_SIZE) {
+                    return slots.get(idx).getName();
+                }
+            }
+        }
+
+        return null;
+    }
+
+    public String getClickedShopItem(int sx, int sy, Map<String, Integer> stockPrices) {
+        if (activeTab != Tab.SKILLS || stockPrices == null || stockPrices.isEmpty()) return null;
+        if (sx < Constants.PANEL_X || sy < CONTENT_Y || sy >= FOOTER_Y) return null;
+
+        int x = Constants.PANEL_X + 8;
+        int y = CONTENT_Y + 24;
+        int row = 0;
+        for (String itemName : stockPrices.keySet()) {
+            int rowTop = y + row * 22;
+            if (sx >= x && sx < Constants.PANEL_X + Constants.PANEL_W - 8
+             && sy >= rowTop && sy < rowTop + 18) {
+                return itemName;
+            }
+            row++;
+        }
+        return null;
+    }
+
     // -----------------------------------------------------------------------
     //  Rendering entry point
     // -----------------------------------------------------------------------
@@ -133,13 +192,15 @@ public class RightPanel {
      *
      * @param g               graphics context (screen space — no camera transform)
      * @param player          the local player (HP, inventory, skills)
-     * @param quest           the main quest (for footer status)
      * @param isChopping      true while WoodcuttingSystem is active
      * @param isMining        true while MiningSystem is active
      * @param isInCombat      true while CombatSystem is active
      * @param combatTarget    name of the current combat enemy, or null
      */
-    public void render(Graphics2D g, Player player, Quest quest,
+    public void render(Graphics2D g, Player player,
+                       boolean shopOpen,
+                       Map<String, Integer> stockPrices,
+                       Map<String, Integer> sellPrices,
                        boolean isChopping, boolean isMining,
                        boolean isInCombat, String combatTarget) {
         int px = Constants.PANEL_X;
@@ -163,12 +224,16 @@ public class RightPanel {
         drawContentDivider(g, px, pw);
 
         if (activeTab == Tab.INVENTORY) {
-            drawInventoryTab(g, px, pw, player);
+            drawInventoryTab(g, px, pw, player, shopOpen, sellPrices);
         } else {
-            drawSkillsTab(g, px, pw, player);
+            if (shopOpen) {
+                drawShopTab(g, px, pw, stockPrices);
+            } else {
+                drawSkillsTab(g, px, pw, player);
+            }
         }
 
-        drawFooter(g, px, pw, quest);
+        drawFooter(g, px, pw);
     }
 
     // -----------------------------------------------------------------------
@@ -280,7 +345,8 @@ public class RightPanel {
     //  Inventory tab  (Y 110–520)
     // -----------------------------------------------------------------------
 
-    private void drawInventoryTab(Graphics2D g, int px, int pw, Player player) {
+    private void drawInventoryTab(Graphics2D g, int px, int pw, Player player,
+                                  boolean shopOpen, Map<String, Integer> sellPrices) {
         int bx = px + 8;
         int contentStartY = CONTENT_Y + 6;
 
@@ -290,10 +356,15 @@ public class RightPanel {
         drawOutlined(g, "INVENTORY   " + invCount + " / 20",
                 bx, contentStartY + 12,
                 new Color(200, 185, 100), new Color(0, 0, 0, 160));
+        if (shopOpen) {
+            g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+            g.setColor(new Color(120, 180, 120));
+            g.drawString("Click an item to sell", bx, contentStartY + 24);
+        }
 
         // Inventory grid
         int gridX = px + (pw - INV_COLS * SLOT_STEP) / 2;
-        int gridY = contentStartY + 18;
+        int gridY = contentStartY + 24;
 
         List<Item> slots = player.getInventory().getSlots();
 
@@ -304,7 +375,10 @@ public class RightPanel {
                 int slotY  = gridY + row * SLOT_STEP;
                 Item item  = idx < slots.size() ? slots.get(idx) : null;
                 boolean hov = (idx == hoverSlot);
-                drawSlot(g, slotX, slotY, item, hov);
+                Integer sellPrice = (shopOpen && item != null && sellPrices != null)
+                        ? sellPrices.get(item.getName())
+                        : null;
+                drawSlot(g, slotX, slotY, item, hov, sellPrice);
             }
         }
 
@@ -322,7 +396,7 @@ public class RightPanel {
     }
 
     /** Draw a single inventory slot at (x, y). */
-    private void drawSlot(Graphics2D g, int x, int y, Item item, boolean hovered) {
+    private void drawSlot(Graphics2D g, int x, int y, Item item, boolean hovered, Integer sellPrice) {
         // Slot background
         Color bg;
         if (hovered) {
@@ -367,6 +441,16 @@ public class RightPanel {
             // Text
             g.setColor(new Color(255, 230, 0));
             g.drawString(cnt, x + 3, y + SLOT_SIZE - 3);
+        }
+
+        if (sellPrice != null) {
+            String price = sellPrice + "c";
+            g.setFont(new Font("Monospaced", Font.BOLD, 8));
+            FontMetrics fm = g.getFontMetrics();
+            g.setColor(new Color(0, 0, 0, 180));
+            g.drawString(price, x + SLOT_SIZE - fm.stringWidth(price) - 3 + 1, y + 10 + 1);
+            g.setColor(new Color(140, 220, 140));
+            g.drawString(price, x + SLOT_SIZE - fm.stringWidth(price) - 3, y + 10);
         }
     }
 
@@ -422,6 +506,43 @@ public class RightPanel {
         y = drawStatRow(g, x, y, bw, "Strength",  player.getStrengthLevel(), new Color(220, 60,  60));
         y = drawStatRow(g, x, y, bw, "Defence",   player.getDefenceLevel(),  new Color( 70, 130, 210));
             drawStatRow(g, x, y, bw, "Hitpoints", player.getMaxHp(),         new Color( 55, 175,  55));
+    }
+
+    private void drawShopTab(Graphics2D g, int px, int pw, Map<String, Integer> stockPrices) {
+        int x = px + 8;
+        int bw = pw - 16;
+        int y = CONTENT_Y + 10;
+
+        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        drawOutlined(g, "SHOP", px + pw / 2 - 10, y + 2,
+                new Color(200, 185, 100), new Color(0, 0, 0, 160));
+        y += 14;
+
+        g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+        g.setColor(new Color(120, 180, 120));
+        g.drawString("Click an item to buy", x, y + 4);
+        y += 14;
+
+        int row = 0;
+        for (Map.Entry<String, Integer> entry : stockPrices.entrySet()) {
+            int rowY = y + row * 22;
+            boolean hovered = row == hoverShopRow;
+
+            g.setColor(hovered ? new Color(60, 50, 28, 220) : new Color(28, 22, 14, 210));
+            g.fillRoundRect(x, rowY, bw, 18, 4, 4);
+            g.setColor(hovered ? new Color(210, 180, 70) : new Color(72, 60, 30));
+            g.drawRoundRect(x, rowY, bw, 18, 4, 4);
+
+            g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+            g.setColor(new Color(195, 185, 125));
+            g.drawString(entry.getKey(), x + 6, rowY + 12);
+
+            String price = entry.getValue() + " Coins";
+            FontMetrics fm = g.getFontMetrics();
+            g.setColor(Color.WHITE);
+            g.drawString(price, x + bw - fm.stringWidth(price) - 6, rowY + 12);
+            row++;
+        }
     }
 
     /**
@@ -492,12 +613,11 @@ public class RightPanel {
     }
 
     // -----------------------------------------------------------------------
-    //  Footer  (Y 520–600) — quest status + hotkeys
+    //  Footer  (Y 520–600) — hotkeys
     // -----------------------------------------------------------------------
 
-    private void drawFooter(Graphics2D g, int px, int pw, Quest quest) {
+    private void drawFooter(Graphics2D g, int px, int pw) {
         int bx = px + 8;
-        int bw = pw - 16;
 
         // Top border
         g.setColor(new Color(80, 65, 35));
@@ -507,27 +627,10 @@ public class RightPanel {
 
         int y = FOOTER_Y + 14;
 
-        // Quest status
-        if (quest != null && quest.getState() != Quest.State.NOT_STARTED) {
-            boolean done = (quest.getState() == Quest.State.COMPLETE);
-            Color qColor = done ? new Color(90, 215, 90) : new Color(200, 185, 80);
-
-            g.setFont(new Font("Monospaced", Font.BOLD, 10));
-            g.setColor(qColor);
-            g.drawString("QUEST: Getting Started", bx, y);
-            y += 13;
-
-            g.setFont(new Font("Monospaced", Font.PLAIN, 10));
-            g.setColor(done ? new Color(90, 215, 90) : Color.WHITE);
-            g.drawString(done ? "[COMPLETE]"
-                              : "Logs: " + quest.getLogsChopped() + " / 3", bx, y);
-            y += 18;
-        }
-
         // Keyboard shortcut hints
         g.setFont(new Font("Monospaced", Font.PLAIN, 9));
         g.setColor(new Color(95, 90, 65));
-        g.drawString("[S]ave  [L]oad  [D]ebug  [M]ute", bx, Constants.SCREEN_HEIGHT - 8);
+        g.drawString("[Enter] Chat  [D]ebug  [M]ute", bx, Math.max(y, Constants.SCREEN_HEIGHT - 8));
     }
 
     // -----------------------------------------------------------------------

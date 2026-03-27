@@ -1,4 +1,4 @@
-package com.classic.preservitory.ui;
+package com.classic.preservitory.ui.overlays;
 
 import java.awt.Color;
 import java.awt.Font;

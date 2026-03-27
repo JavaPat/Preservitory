@@ -17,6 +17,7 @@ import java.awt.*;
  */
 public class NPC extends Entity {
 
+    private String id;
     private final String  name;
     private final boolean shopkeeper;
 
@@ -88,4 +89,6 @@ public class NPC extends Entity {
 
     public String  getName()       { return name; }
     public boolean isShopkeeper()  { return shopkeeper; }
+    public String  getId()         { return id; }
+    public void    setId(String id) { this.id = id; }
 }
