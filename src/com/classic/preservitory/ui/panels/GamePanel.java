@@ -15,6 +15,7 @@ import com.classic.preservitory.system.DialogueSystem;
 import com.classic.preservitory.system.MiningSystem;
 import com.classic.preservitory.system.MovementSystem;
 import com.classic.preservitory.system.Pathfinding;
+import com.classic.preservitory.system.MusicManager;
 import com.classic.preservitory.system.SoundSystem;
 import com.classic.preservitory.system.WoodcuttingSystem;
 import com.classic.preservitory.ui.framework.assets.AssetManager;
@@ -103,6 +104,7 @@ public class GamePanel extends JPanel {
     private final CombatSystem      combatSystem;
     private final DialogueSystem    dialogueSystem;
     private final SoundSystem       soundSystem;
+    private MusicManager            musicManager;
     private final GameLoop          gameLoop;
 
     // -----------------------------------------------------------------------
@@ -203,7 +205,8 @@ public class GamePanel extends JPanel {
     //  Construction
     // -----------------------------------------------------------------------
 
-    public GamePanel() {
+    public GamePanel(MusicManager musicManager) {
+        this.musicManager = musicManager;
 
         AssetManager.load();
 
@@ -352,6 +355,7 @@ public class GamePanel extends JPanel {
             isTypingChat  = false;
             chatInput.setLength(0);
             loginScreen.reset();
+            musicManager.stop();
             chatBox.post("Logged in as " + username + ".", ChatBox.COLOR_SYSTEM);
             showMessage("Authenticated as " + username + ".");
             if (loginSuccessListener != null) loginSuccessListener.accept(username);
@@ -518,7 +522,18 @@ public class GamePanel extends JPanel {
     //  Input — mouse clicks
     // -----------------------------------------------------------------------
 
+    private static final int MUSIC_BTN_SIZE = 28;
+    private static final int MUSIC_BTN_X    = Constants.SCREEN_WIDTH  - MUSIC_BTN_SIZE - 6;
+    private static final int MUSIC_BTN_Y    = Constants.SCREEN_HEIGHT - MUSIC_BTN_SIZE - 6;
+
     private void handleClick(int cx, int cy) {
+        // Music toggle — works on both login screen and gameplay
+        if (cx >= MUSIC_BTN_X && cx <= MUSIC_BTN_X + MUSIC_BTN_SIZE
+         && cy >= MUSIC_BTN_Y && cy <= MUSIC_BTN_Y + MUSIC_BTN_SIZE) {
+            musicManager.setMuted(!musicManager.isMuted());
+            return;
+        }
+
         if (authRequired) {
             loginScreen.handleClick(cx, cy);
             return;
@@ -1030,6 +1045,9 @@ public class GamePanel extends JPanel {
         // Full-screen overlays (screen space, rendered over the viewport only)
         if (gameState == GameState.IN_DIALOGUE) drawDialogueBox(g2);
         if (authRequired) loginScreen.render(g2);
+        // Music toggle button — always on top, bottom-right corner
+        drawMusicToggle(g2);
+
         // Messages, debug, FPS (screen space)
         drawActionMessage(g2);
         if (debugMode) drawDebugOverlay(g2);
@@ -1215,6 +1233,25 @@ public class GamePanel extends JPanel {
                 ? "FPS: " + displayedFps
                 : "FPS: " + displayedFps + "  Account: " + currentAccountName;
         g.drawString(label, 8, 14);
+    }
+
+    private void drawMusicToggle(Graphics2D g) {
+        String key = musicManager.isMuted() ? "unmute" : "mute";
+        java.awt.image.BufferedImage icon = com.classic.preservitory.ui.framework.assets.AssetManager.getImage(key);
+        if (icon != null) {
+            g.drawImage(icon, MUSIC_BTN_X, MUSIC_BTN_Y, MUSIC_BTN_SIZE, MUSIC_BTN_SIZE, null);
+        } else {
+            // Fallback: small labelled box
+            g.setColor(new Color(30, 30, 30, 180));
+            g.fillRect(MUSIC_BTN_X, MUSIC_BTN_Y, MUSIC_BTN_SIZE, MUSIC_BTN_SIZE);
+            g.setColor(new Color(220, 200, 120));
+            g.setFont(new Font("Monospaced", Font.BOLD, 9));
+            String label = musicManager.isMuted() ? "OFF" : "ON";
+            FontMetrics fm = g.getFontMetrics();
+            g.drawString(label,
+                    MUSIC_BTN_X + (MUSIC_BTN_SIZE - fm.stringWidth(label)) / 2,
+                    MUSIC_BTN_Y + (MUSIC_BTN_SIZE + fm.getAscent()) / 2 - 2);
+        }
     }
 
 

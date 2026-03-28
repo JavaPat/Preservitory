@@ -14,9 +14,11 @@ public class AssetManager {
 
     public static void load() {
         loadImage("login_bg", "sprites/login_screen/background.png");
+        loadImage("logo", "sprites/login_screen/logo.png");
         loadImage("login_box", "sprites/login_screen/box.png");
         loadImage("login_button", "sprites/login_screen/button.png");
-        loadImage("logo", "sprites/login_screen/logo.png");
+        loadImage("mute", "sprites/login_screen/mute.png");
+        loadImage("unmute", "sprites/login_screen/unmute.png");
     }
 
     private static void loadImage(String key, String path) {

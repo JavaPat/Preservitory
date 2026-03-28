@@ -1,6 +1,7 @@
 package com.classic.preservitory.game;
 
 import com.classic.preservitory.cache.CacheDownloader;
+import com.classic.preservitory.system.MusicManager;
 import com.classic.preservitory.ui.panels.GamePanel;
 import com.classic.preservitory.ui.screens.LoadingScreen;
 import com.classic.preservitory.util.Constants;
@@ -14,6 +15,9 @@ public class Game {
     private GamePanel panel;
 
     public void start() {
+        MusicManager musicManager = new MusicManager();
+        musicManager.start();
+
         SwingUtilities.invokeLater(() -> {
             LoadingScreen loadingScreen = new LoadingScreen();
             window = buildWindow(loadingScreen);
@@ -25,7 +29,7 @@ public class Game {
                 );
 
                 SwingUtilities.invokeLater(() -> {
-                    panel = new GamePanel();
+                    panel = new GamePanel(musicManager);
                     panel.setLoginSuccessListener(this::setUsername);
                     panel.setDisconnectListener(this::resetTitle);
                     window.getContentPane().removeAll();
