@@ -1,0 +1,8 @@
+{
+  "id": "yew_tree",
+  "category": "tree",
+  "width": 32,
+  "height": 32,
+  "blocksMovement": true,
+  "respawnMs": 40000
+}

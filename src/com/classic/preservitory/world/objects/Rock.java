@@ -1,6 +1,7 @@
 package com.classic.preservitory.world.objects;
 
 import com.classic.preservitory.entity.Entity;
+import com.classic.preservitory.ui.framework.assets.AssetManager;
 import com.classic.preservitory.world.DefinitionLoader;
 import com.classic.preservitory.world.ObjectDefinition;
 import com.classic.preservitory.util.Constants;
@@ -8,6 +9,7 @@ import com.classic.preservitory.util.IsoUtils;
 
 import java.awt.Color;
 import java.awt.Graphics;
+import java.awt.image.BufferedImage;
 
 /**
  * A minable rock whose alive/depleted state is driven entirely by the server.
@@ -90,7 +92,12 @@ public class Rock extends Entity {
         int footY = isoY + IsoUtils.ISO_TILE_H;
 
         if (state == State.SOLID) {
-            renderSolid(g, footX, footY);
+            BufferedImage sprite = AssetManager.getImage(typeId);
+            if (sprite != null) {
+                g.drawImage(sprite, footX - sprite.getWidth() / 2, footY - sprite.getHeight() + 16, null);
+            } else {
+                renderSolid(g, footX, footY);
+            }
         } else {
             renderDepleted(g, footX, footY);
         }

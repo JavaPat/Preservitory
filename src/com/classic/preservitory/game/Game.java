@@ -1,7 +1,15 @@
 package com.classic.preservitory.game;
 
 import com.classic.preservitory.cache.CacheDownloader;
-import com.classic.preservitory.system.MusicManager;
+import com.classic.preservitory.client.definitions.EnemyDefinitionLoader;
+import com.classic.preservitory.client.definitions.EnemyDefinitionManager;
+import com.classic.preservitory.client.definitions.ItemDefinitionLoader;
+import com.classic.preservitory.client.definitions.ItemDefinitionManager;
+import com.classic.preservitory.client.definitions.NpcDefinitionLoader;
+import com.classic.preservitory.client.definitions.NpcDefinitionManager;
+import com.classic.preservitory.client.definitions.ObjectDefinitionLoader;
+import com.classic.preservitory.client.definitions.ObjectDefinitionManager;
+import com.classic.preservitory.system.audio.MusicManager;
 import com.classic.preservitory.ui.panels.GamePanel;
 import com.classic.preservitory.ui.screens.LoadingScreen;
 import com.classic.preservitory.util.Constants;
@@ -11,12 +19,12 @@ import javax.swing.SwingUtilities;
 
 public class Game {
 
-    private JFrame    window;
+    private JFrame window;
     private GamePanel panel;
 
     public void start() {
         MusicManager musicManager = new MusicManager();
-        musicManager.start();
+        musicManager.play();
 
         SwingUtilities.invokeLater(() -> {
             LoadingScreen loadingScreen = new LoadingScreen();
@@ -27,6 +35,10 @@ public class Game {
                 CacheDownloader.init((percent, status) ->
                     SwingUtilities.invokeLater(() -> loadingScreen.setProgress(percent, status))
                 );
+                ItemDefinitionManager.load(ItemDefinitionLoader.loadAll());
+                ObjectDefinitionManager.load(ObjectDefinitionLoader.loadAll());
+                EnemyDefinitionManager.load(EnemyDefinitionLoader.loadAll());
+                NpcDefinitionManager.load(NpcDefinitionLoader.loadAll());
 
                 SwingUtilities.invokeLater(() -> {
                     panel = new GamePanel(musicManager);
@@ -67,6 +79,6 @@ public class Game {
         return frame;
     }
 
-    public JFrame    getWindow() { return window; }
+    public JFrame getWindow() { return window; }
     public GamePanel getPanel()  { return panel;  }
 }

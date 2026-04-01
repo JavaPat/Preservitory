@@ -5,7 +5,9 @@ import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
+import java.util.List;
 
 /**
  * Scrolling message log shown as a semi-transparent overlay at the bottom of
@@ -51,14 +53,77 @@ public class ChatBox {
     private static final int INPUT_BAR_H   = 18;
 
     // -----------------------------------------------------------------------
+    //  Layout constants — dialogue options
+    // -----------------------------------------------------------------------
+
+    private static final int OPT_ROW_H = 13; // height of each option row in pixels
+
+    // -----------------------------------------------------------------------
     //  Internal state
     // -----------------------------------------------------------------------
 
     private final Deque<ChatEntry> entries = new ArrayDeque<>();
 
+    /** Non-null while an NPC dialogue is active. */
+    private String       dialogueNpcName = null;
+    private String       dialogueText    = null;
+    /** Player-selectable options for the current dialogue node. Empty = none. */
+    private List<String> dialogueOptions = new ArrayList<>();
+
+    /** Cached top-y of the first option row within the chatbox, set during render. */
+    private int optionsStartY = -1;
+
     // -----------------------------------------------------------------------
     //  Public API
     // -----------------------------------------------------------------------
+
+    /** Enter dialogue mode — replaces the message log with a single NPC line. */
+    public void setDialogue(String npcName, String text) {
+        this.dialogueNpcName = npcName;
+        this.dialogueText    = text;
+        this.dialogueOptions.clear();
+        this.optionsStartY   = -1;
+    }
+
+    /**
+     * Set the player-selectable options for the current dialogue node.
+     * Must be called after {@link #setDialogue(String, String)}.
+     */
+    public void setDialogueOptions(List<String> options) {
+        this.dialogueOptions = options != null ? new ArrayList<>(options) : new ArrayList<>();
+        this.optionsStartY   = -1;
+    }
+
+    /** Exit dialogue mode — resume showing the normal message log. */
+    public void clearDialogue() {
+        this.dialogueNpcName = null;
+        this.dialogueText    = null;
+        this.dialogueOptions.clear();
+        this.optionsStartY   = -1;
+    }
+
+    /** True when the current dialogue node has player-selectable options. */
+    public boolean hasOptions() {
+        return dialogueNpcName != null && !dialogueOptions.isEmpty();
+    }
+
+    /** Number of options currently shown. */
+    public int getOptionCount() { return dialogueOptions.size(); }
+
+    /**
+     * Returns the 0-based index of the option row under the given y-coordinate
+     * (relative to the top of the chatbox widget), or {@code -1} if no option
+     * is there.  Only meaningful after the first {@link #render} call that drew options.
+     *
+     * @param chatBoxY   y coordinate of the click, relative to the chatbox top edge
+     */
+    public int getOptionIndexAtY(int chatBoxY) {
+        if (optionsStartY < 0 || dialogueOptions.isEmpty()) return -1;
+        int relY = chatBoxY - optionsStartY;
+        if (relY < 0) return -1;
+        int idx = relY / OPT_ROW_H;
+        return (idx < dialogueOptions.size()) ? idx : -1;
+    }
 
     /** Add a white message. */
     public void post(String text) {
@@ -114,8 +179,73 @@ public class ChatBox {
         // ---- Compute message area (shrink if input bar is visible) ----
         int msgAreaH = typing ? h - INPUT_BAR_H : h;
 
-        // ---- Messages (newest at bottom, older scrolling upward) ----
-        if (!entries.isEmpty()) {
+        // ---- Dialogue mode: show NPC name + current line ----
+        if (dialogueNpcName != null && dialogueText != null) {
+            int padX = 7;
+
+            // NPC name (cyan, bold)
+            g.setFont(new Font("Monospaced", Font.BOLD, 11));
+            FontMetrics fmBold = g.getFontMetrics();
+            int nameY = y + fmBold.getAscent() + 5;
+            g.setColor(new Color(0, 0, 0, 200));
+            g.drawString(dialogueNpcName + ":", x + padX + 1, nameY + 1);
+            g.setColor(new Color(60, 215, 215));
+            g.drawString(dialogueNpcName + ":", x + padX, nameY);
+
+            // Dialogue text (white)
+            g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+            FontMetrics fm = g.getFontMetrics();
+            int textY = nameY + fm.getHeight() + 2;
+            g.setColor(new Color(0, 0, 0, 200));
+            g.drawString(dialogueText, x + padX + 1, textY + 1);
+            g.setColor(Color.WHITE);
+            g.drawString(dialogueText, x + padX, textY);
+
+            if (!dialogueOptions.isEmpty()) {
+                // ---- Option rows ----
+                g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+                FontMetrics fmOpt = g.getFontMetrics();
+                int optCursor = textY + fmOpt.getHeight() + 2;
+                optionsStartY = optCursor - y; // store relative to chatbox top
+                int maxLabelW = w - 2 * padX - 2; // maximum pixel width for option text
+                int bottomBound = y + msgAreaH - 6; // don't render below this
+                for (int i = 0; i < dialogueOptions.size() && i < 4; i++) {
+                    String label = "[" + (i + 1) + "] " + dialogueOptions.get(i);
+                    label = truncateText(label, fmOpt, maxLabelW);
+                    int oy = optCursor + fmOpt.getAscent();
+                    if (oy > bottomBound) break; // no space left — stop drawing
+                    g.setColor(new Color(0, 0, 0, 180));
+                    g.drawString(label, x + padX + 1, oy + 1);
+                    g.setColor(new Color(255, 215, 80));
+                    g.drawString(label, x + padX, oy);
+                    optCursor += OPT_ROW_H;
+                }
+
+                // Hint (bottom-right)
+                String prompt = "[Press 1-" + Math.min(dialogueOptions.size(), 4) + " or click]";
+                g.setFont(new Font("Monospaced", Font.ITALIC, 10));
+                FontMetrics fmHint = g.getFontMetrics();
+                int hintX = x + w - fmHint.stringWidth(prompt) - padX;
+                int hintY = y + msgAreaH - 5;
+                g.setColor(new Color(0, 0, 0, 180));
+                g.drawString(prompt, hintX + 1, hintY + 1);
+                g.setColor(new Color(160, 160, 160));
+                g.drawString(prompt, hintX, hintY);
+            } else {
+                // "[Click to continue]" hint (gray, bottom-right)
+                String prompt = "[Click to continue]";
+                g.setFont(new Font("Monospaced", Font.ITALIC, 10));
+                FontMetrics fmHint = g.getFontMetrics();
+                int hintX = x + w - fmHint.stringWidth(prompt) - padX;
+                int hintY = y + msgAreaH - 5;
+                g.setColor(new Color(0, 0, 0, 180));
+                g.drawString(prompt, hintX + 1, hintY + 1);
+                g.setColor(new Color(160, 160, 160));
+                g.drawString(prompt, hintX, hintY);
+            }
+
+        // ---- Normal mode: scrolling message log ----
+        } else if (!entries.isEmpty()) {
             g.setFont(new Font("Monospaced", Font.PLAIN, 11));
             FontMetrics fm  = g.getFontMetrics();
             int lineH       = fm.getHeight() + 1;
@@ -164,6 +294,25 @@ public class ChatBox {
             g.setColor(new Color(255, 215, 80));
             g.drawString(display, x + padX, textY);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    //  Rendering helpers
+    // -----------------------------------------------------------------------
+
+    /**
+     * Truncates {@code text} with {@code "..."} if it exceeds {@code maxWidth} pixels.
+     * Returns the original string unchanged if it fits.
+     */
+    private static String truncateText(String text, FontMetrics fm, int maxWidth) {
+        if (fm.stringWidth(text) <= maxWidth) return text;
+        String ellipsis = "...";
+        int ellipsisW = fm.stringWidth(ellipsis);
+        int avail = maxWidth - ellipsisW;
+        if (avail <= 0) return ellipsis;
+        int len = text.length();
+        while (len > 0 && fm.stringWidth(text.substring(0, len)) > avail) len--;
+        return text.substring(0, len) + ellipsis;
     }
 
     // -----------------------------------------------------------------------

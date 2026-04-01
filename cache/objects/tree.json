@@ -4,5 +4,5 @@
   "width": 32,
   "height": 32,
   "blocksMovement": true,
-  "respawnMs": 12000
+  "respawnMs": 10000
 }

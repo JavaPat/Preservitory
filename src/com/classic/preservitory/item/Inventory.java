@@ -1,96 +1,123 @@
 package com.classic.preservitory.item;
 
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 /**
- * A fixed-size bag of items, modelled after RuneScape's 28-slot inventory
- * (we use 20 here for a tighter UI).
+ * Fixed-size slot-based player inventory (28 slots, OSRS-style).
  *
- * Rules:
- *   - Stackable items share a single slot; only the count grows.
- *   - Non-stackable items each take a new slot.
- *   - When all slots are filled, addItem() returns false.
+ * <p>Backed by a {@code Item[28]} array so slot indices map directly to server slots.
+ * Null entries represent empty slots.</p>
+ *
+ * <p>Populated exclusively via {@link #setSlot(int, Item)} from the server's
+ * {@code INVENTORY_UPDATE} snapshot. {@link #addItem(Item)} is kept for
+ * cases where exact slot placement is not required (e.g. pickup prediction).</p>
  */
 public class Inventory {
 
-    public static final int MAX_SLOTS = 20;
+    public static final int MAX_SLOTS = 28;
 
-    private final List<Item> slots = new ArrayList<>();
+    private final Item[] slots = new Item[MAX_SLOTS];
+
+    // -----------------------------------------------------------------------
+    //  Slot-level access
+    // -----------------------------------------------------------------------
 
     /**
-     * Try to add an item.
+     * Place {@code item} directly into slot {@code index}, overwriting whatever was there.
+     * Ignores out-of-bounds indices silently.
+     */
+    public void setSlot(int index, Item item) {
+        if (index >= 0 && index < MAX_SLOTS) slots[index] = item;
+    }
+
+    /** Empty slot {@code index}. Ignores out-of-bounds indices silently. */
+    public void clearSlot(int index) {
+        if (index >= 0 && index < MAX_SLOTS) slots[index] = null;
+    }
+
+    // -----------------------------------------------------------------------
+    //  Collection operations
+    // -----------------------------------------------------------------------
+
+    /**
+     * Add an item to the first available slot, merging stackable items.
      *
-     * @return true  if the item was added (or stacked)
-     *         false if the inventory is full and no existing stack was found
+     * @return {@code true} if the item was added; {@code false} if all slots are occupied.
      */
     public boolean addItem(Item item) {
-        // Stackable: merge the full count into any existing stack of the same name
         if (item.isStackable()) {
-            for (Item existing : slots) {
-                if (existing.getName().equals(item.getName())) {
-                    existing.addCount(item.getCount()); // handles qty > 1 (e.g. loot drops)
+            for (int i = 0; i < MAX_SLOTS; i++) {
+                if (slots[i] != null && slots[i].getItemId() == item.getItemId()) {
+                    slots[i].addCount(item.getCount());
                     return true;
                 }
             }
         }
-
-        // New slot needed — check if there is room
-        if (slots.size() >= MAX_SLOTS) {
-            return false;
+        for (int i = 0; i < MAX_SLOTS; i++) {
+            if (slots[i] == null) {
+                slots[i] = item;
+                return true;
+            }
         }
-
-        slots.add(item);
-        return true;
+        return false;
     }
 
-    /**
-     * Total count of all items with the given name across all slots.
-     * For stackable items this is the stack count; for non-stackable it is
-     * the number of occupied slots (each has count 1).
-     */
-    public int countOf(String name) {
-        int total = 0;
-        for (Item item : slots) {
-            if (item.getName().equals(name)) total += item.getCount();
-        }
-        return total;
-    }
-
-    /**
-     * Remove up to {@code amount} units of the named item.
-     * For stackable stacks the count is reduced; the slot is removed when it
-     * reaches zero.  For non-stackable items, individual slots are removed.
-     */
-    public void removeItem(String name, int amount) {
-        for (int i = 0; i < slots.size() && amount > 0; i++) {
-            Item item = slots.get(i);
-            if (!item.getName().equals(name)) continue;
-
+    public void removeItem(int itemId, int amount) {
+        for (int i = 0; i < MAX_SLOTS && amount > 0; i++) {
+            Item item = slots[i];
+            if (item == null || item.getItemId() != itemId) continue;
             if (item.isStackable()) {
                 int take = Math.min(amount, item.getCount());
                 item.setCount(item.getCount() - take);
                 amount -= take;
-                if (item.getCount() <= 0) { slots.remove(i); i--; }
+                if (item.getCount() <= 0) slots[i] = null;
             } else {
-                slots.remove(i);
-                i--;
+                slots[i] = null;
                 amount--;
             }
         }
     }
 
-    /** Remove all items so a fresh authoritative inventory snapshot can be applied. */
     public void clear() {
-        slots.clear();
+        Arrays.fill(slots, null);
     }
 
-    /** Unmodifiable view of occupied slots (one entry per inventory slot). */
+    // -----------------------------------------------------------------------
+    //  Queries
+    // -----------------------------------------------------------------------
+
+    /** Total count of {@code itemId} across all slots. */
+    public int countOf(int itemId) {
+        int total = 0;
+        for (Item slot : slots) {
+            if (slot != null && slot.getItemId() == itemId) total += slot.getCount();
+        }
+        return total;
+    }
+
+    /** Number of non-empty slots. */
+    public int getSlotCount() {
+        int count = 0;
+        for (Item s : slots) if (s != null) count++;
+        return count;
+    }
+
+    public boolean isFull() {
+        for (Item s : slots) if (s == null) return false;
+        return true;
+    }
+
+    // -----------------------------------------------------------------------
+    //  View
+    // -----------------------------------------------------------------------
+
+    /**
+     * Unmodifiable list view of all 28 slots, indexed by position.
+     * {@code null} entries are empty slots.
+     */
     public List<Item> getSlots() {
-        return Collections.unmodifiableList(slots);
+        return Collections.unmodifiableList(Arrays.asList(slots));
     }
-
-    public int     getSlotCount() { return slots.size(); }
-    public boolean isFull()       { return slots.size() >= MAX_SLOTS; }
 }

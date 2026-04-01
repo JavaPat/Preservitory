@@ -1,25 +1,36 @@
 package com.classic.preservitory.client.world;
 
+import com.classic.preservitory.client.definitions.EnemyDefinition;
+import com.classic.preservitory.client.definitions.EnemyDefinitionManager;
 import com.classic.preservitory.entity.Enemy;
 import com.classic.preservitory.entity.NPC;
 import com.classic.preservitory.util.Constants;
-import com.classic.preservitory.world.objects.Goblin;
 import com.classic.preservitory.world.objects.Loot;
 import com.classic.preservitory.world.objects.Rock;
 import com.classic.preservitory.world.objects.Tree;
 
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 public class ClientWorld {
 
-    private final ConcurrentHashMap<String, Tree>  trees   = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Rock>  rocks   = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Enemy> enemies = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Loot>  loot    = new ConcurrentHashMap<>();
-
-    private final LinkedHashMap<String, NPC> npcs = new LinkedHashMap<>();
+    // IMPORTANT:
+    // Do not access map values directly from callers.
+    // Always use the snapshot getters below to ensure thread safety.
+    private final AtomicReference<Map<String, Tree>> trees =
+            new AtomicReference<>(new LinkedHashMap<>());
+    private final AtomicReference<Map<String, Rock>> rocks =
+            new AtomicReference<>(new LinkedHashMap<>());
+    private final AtomicReference<Map<String, Enemy>> enemies =
+            new AtomicReference<>(new LinkedHashMap<>());
+    private final AtomicReference<Map<String, NPC>> npcs =
+            new AtomicReference<>(new LinkedHashMap<>());
+    private final AtomicReference<Map<String, Loot>> loot =
+            new AtomicReference<>(new LinkedHashMap<>());
 
     private Consumer<DamageEvent> damageListener;
 
@@ -51,30 +62,34 @@ public class ClientWorld {
     // -----------------------------------------------------------------------
 
     public void updateTrees(Map<String, ObjectStateData> data) {
-        for (Map.Entry<String, Tree> entry : trees.entrySet()) {
-            if (!data.containsKey(entry.getKey()) && entry.getValue().isAlive()) {
-                entry.getValue().setAlive(false);
+        updateSnapshot(trees, next -> {
+            for (Map.Entry<String, Tree> entry : next.entrySet()) {
+                if (!data.containsKey(entry.getKey()) && entry.getValue().isAlive()) {
+                    entry.getValue().setAlive(false);
+                }
             }
-        }
 
-        for (Map.Entry<String, ObjectStateData> entry : data.entrySet()) {
-            String id  = entry.getKey();
-            ObjectStateData state = entry.getValue();
+            for (Map.Entry<String, ObjectStateData> entry : data.entrySet()) {
+                String id = entry.getKey();
+                ObjectStateData state = entry.getValue();
 
-            Tree t = trees.get(id);
-            if (t == null) {
-                t = new Tree(id, state.typeId, state.x, state.y);
-                trees.put(id, t);
-            } else {
-                t.setPosition(state.x, state.y);
+                Tree t = next.get(id);
+                if (t == null) {
+                    t = new Tree(id, state.typeId, state.x, state.y);
+                    next.put(id, t);
+                } else {
+                    t.setPosition(state.x, state.y);
+                }
+                t.setAlive(true);
             }
-            t.setAlive(true);
-        }
+        });
     }
 
     public void chopTree(String id) {
-        Tree t = trees.get(id);
-        if (t != null) t.setAlive(false);
+        updateSnapshot(trees, next -> {
+            Tree t = next.get(id);
+            if (t != null) t.setAlive(false);
+        });
     }
 
     public void addTree(String[] parts) {
@@ -85,13 +100,15 @@ public class ClientWorld {
             int x = Integer.parseInt(parts[2]);
             int y = Integer.parseInt(parts[3]);
 
-            Tree t = trees.get(id);
-            if (t == null) {
-                trees.put(id, new Tree(id, typeId, x, y));
-            } else {
-                t.setPosition(x, y);
-                t.setAlive(true);
-            }
+            updateSnapshot(trees, next -> {
+                Tree t = next.get(id);
+                if (t == null) {
+                    next.put(id, new Tree(id, typeId, x, y));
+                } else {
+                    t.setPosition(x, y);
+                    t.setAlive(true);
+                }
+            });
         } catch (NumberFormatException ignored) {}
     }
 
@@ -100,30 +117,34 @@ public class ClientWorld {
     // -----------------------------------------------------------------------
 
     public void updateRocks(Map<String, ObjectStateData> data) {
-        for (Map.Entry<String, Rock> entry : rocks.entrySet()) {
-            if (!data.containsKey(entry.getKey()) && entry.getValue().isSolid()) {
-                entry.getValue().setAlive(false);
+        updateSnapshot(rocks, next -> {
+            for (Map.Entry<String, Rock> entry : next.entrySet()) {
+                if (!data.containsKey(entry.getKey()) && entry.getValue().isSolid()) {
+                    entry.getValue().setAlive(false);
+                }
             }
-        }
 
-        for (Map.Entry<String, ObjectStateData> entry : data.entrySet()) {
-            String id  = entry.getKey();
-            ObjectStateData state = entry.getValue();
+            for (Map.Entry<String, ObjectStateData> entry : data.entrySet()) {
+                String id = entry.getKey();
+                ObjectStateData state = entry.getValue();
 
-            Rock r = rocks.get(id);
-            if (r == null) {
-                r = new Rock(id, state.typeId, state.x, state.y);
-                rocks.put(id, r);
-            } else {
-                r.setPosition(state.x, state.y);
+                Rock r = next.get(id);
+                if (r == null) {
+                    r = new Rock(id, state.typeId, state.x, state.y);
+                    next.put(id, r);
+                } else {
+                    r.setPosition(state.x, state.y);
+                }
+                r.setAlive(true);
             }
-            r.setAlive(true);
-        }
+        });
     }
 
     public void mineRock(String id) {
-        Rock r = rocks.get(id);
-        if (r != null) r.setAlive(false);
+        updateSnapshot(rocks, next -> {
+            Rock r = next.get(id);
+            if (r != null) r.setAlive(false);
+        });
     }
 
     public void addRock(String[] parts) {
@@ -134,13 +155,15 @@ public class ClientWorld {
             int x = Integer.parseInt(parts[2]);
             int y = Integer.parseInt(parts[3]);
 
-            Rock r = rocks.get(id);
-            if (r == null) {
-                rocks.put(id, new Rock(id, typeId, x, y));
-            } else {
-                r.setPosition(x, y);
-                r.setAlive(true);
-            }
+            updateSnapshot(rocks, next -> {
+                Rock r = next.get(id);
+                if (r == null) {
+                    next.put(id, new Rock(id, typeId, x, y));
+                } else {
+                    r.setPosition(x, y);
+                    r.setAlive(true);
+                }
+            });
         } catch (NumberFormatException ignored) {}
     }
 
@@ -149,46 +172,47 @@ public class ClientWorld {
     // -----------------------------------------------------------------------
 
     public void updateEnemies(Map<String, EnemyData> data) {
-        // Mark missing enemies as dead
-        for (Map.Entry<String, Enemy> entry : enemies.entrySet()) {
-            if (!data.containsKey(entry.getKey())) {
-                entry.getValue().setHp(0);
-            }
-        }
-
-        for (Map.Entry<String, EnemyData> entry : data.entrySet()) {
-            String id = entry.getKey();
-            EnemyData d = entry.getValue();
-
-            Enemy e = enemies.get(id);
-
-            if (e == null) {
-                Goblin g = new Goblin(d.x, d.y);
-                g.setId(id);
-                enemies.put(id, g);
-                e = g;
-            }
-
-            int oldHp = e.getHp();
-            int newHp = d.hp;
-
-            // ✅ DAMAGE DETECTION
-            if (newHp < oldHp) {
-                int damage = oldHp - newHp;
-
-                if (damageListener != null) {
-                    damageListener.accept(
-                            new DamageEvent(
-                                    e.getCenterX(),
-                                    e.getY() - 4,
-                                    damage
-                            )
-                    );
+        updateSnapshot(enemies, next -> {
+            for (Map.Entry<String, Enemy> entry : next.entrySet()) {
+                if (!data.containsKey(entry.getKey())) {
+                    entry.getValue().setHp(0);
                 }
             }
 
-            e.setHp(newHp);
-        }
+            for (Map.Entry<String, EnemyData> entry : data.entrySet()) {
+                String id = entry.getKey();
+                EnemyData d = entry.getValue();
+
+                Enemy e = next.get(id);
+
+                if (e == null) {
+                    String key = id.replaceAll("_\\d+$", "");
+                    EnemyDefinition def = EnemyDefinitionManager.getByKey(key);
+                    int definitionId = (def != null) ? def.id : EnemyDefinition.INVALID_ID;
+                    Enemy enemy = new Enemy(definitionId, d.x, d.y);
+                    enemy.setId(id);
+                    next.put(id, enemy);
+                    e = enemy;
+                }
+
+                e.setX(d.x);
+                e.setY(d.y);
+
+                int oldHp = e.getHp();
+                int newHp = d.hp;
+
+                if (newHp < oldHp && damageListener != null) {
+                    int damage = oldHp - newHp;
+                    damageListener.accept(new DamageEvent(
+                            e.getCenterX(),
+                            e.getY() - 4,
+                            damage
+                    ));
+                }
+
+                e.setHp(newHp);
+            }
+        });
     }
 
     // -----------------------------------------------------------------------
@@ -196,13 +220,14 @@ public class ClientWorld {
     // -----------------------------------------------------------------------
 
     public void updateNpcs(Map<String, NPCData> data) {
-        npcs.clear();
+        Map<String, NPC> next = new LinkedHashMap<>();
         for (Map.Entry<String, NPCData> entry : data.entrySet()) {
             NPCData d = entry.getValue();
             NPC npc = new NPC(d.x, d.y, d.name, d.shopkeeper);
             npc.setId(d.id);
-            npcs.put(entry.getKey(), npc);
+            next.put(entry.getKey(), npc);
         }
+        npcs.set(next);
     }
 
     // -----------------------------------------------------------------------
@@ -210,57 +235,73 @@ public class ClientWorld {
     // -----------------------------------------------------------------------
 
     public void updateLoot(Map<String, LootData> data) {
-        loot.clear();
+        Map<String, Loot> next = new LinkedHashMap<>();
         for (Map.Entry<String, LootData> entry : data.entrySet()) {
             LootData d = entry.getValue();
-            loot.put(d.id, new Loot(d.id, d.x, d.y, d.itemName, d.count));
+            next.put(d.id, new Loot(d.id, d.x, d.y, d.itemId, d.count));
         }
+        loot.set(next);
     }
 
     public void addLoot(LootData d) {
-        loot.put(d.id, new Loot(d.id, d.x, d.y, d.itemName, d.count));
+        updateSnapshot(loot, next ->
+                next.put(d.id, new Loot(d.id, d.x, d.y, d.itemId, d.count)));
     }
 
     public void removeLoot(String id) {
-        loot.remove(id);
+        updateSnapshot(loot, next -> next.remove(id));
     }
 
     // -----------------------------------------------------------------------
     //  Queries
     // -----------------------------------------------------------------------
 
-    public Collection<Tree> getTrees() { return Collections.unmodifiableCollection(trees.values()); }
-    public Collection<Rock> getRocks() { return Collections.unmodifiableCollection(rocks.values()); }
-    public Collection<Enemy> getEnemies() { return Collections.unmodifiableCollection(enemies.values()); }
-    public Collection<NPC> getNpcs() { return Collections.unmodifiableCollection(npcs.values()); }
-    public Collection<Loot> getLoot() { return Collections.unmodifiableCollection(loot.values()); }
+    public List<NPC> getNpcs() {
+        return new ArrayList<>(npcs.get().values());
+    }
+
+    public List<Enemy> getEnemies() {
+        return new ArrayList<>(enemies.get().values());
+    }
+
+    public List<Tree> getTrees() {
+        return new ArrayList<>(trees.get().values());
+    }
+
+    public List<Rock> getRocks() {
+        return new ArrayList<>(rocks.get().values());
+    }
+
+    public List<Loot> getLoot() {
+        return new ArrayList<>(loot.get().values());
+    }
 
     public Tree getTreeAt(int px, int py) {
-        for (Tree t : trees.values()) if (t.containsPoint(px, py)) return t;
+        for (Tree t : getTrees()) if (t.containsPoint(px, py)) return t;
         return null;
     }
 
     public Rock getRockAt(int px, int py) {
-        for (Rock r : rocks.values()) if (r.containsPoint(px, py)) return r;
+        for (Rock r : getRocks()) if (r.containsPoint(px, py)) return r;
         return null;
     }
 
     public Enemy getEnemyAt(int px, int py) {
-        for (Enemy e : enemies.values()) if (e.containsPoint(px, py)) return e;
+        for (Enemy e : getEnemies()) if (e.containsPoint(px, py)) return e;
         return null;
     }
 
     public NPC getNpcAt(int px, int py) {
-        for (NPC n : npcs.values()) if (n.containsPoint(px, py)) return n;
+        for (NPC n : getNpcs()) if (n.containsPoint(px, py)) return n;
         return null;
     }
 
     public NPC getNpc(String id) {
-        return npcs.get(id);
+        return npcs.get().get(id);
     }
 
     public Loot getLootAt(int px, int py) {
-        for (Loot l : loot.values()) if (l.containsPoint(px, py)) return l;
+        for (Loot l : getLoot()) if (l.containsPoint(px, py)) return l;
         return null;
     }
 
@@ -269,7 +310,7 @@ public class ClientWorld {
     // -----------------------------------------------------------------------
 
     public boolean isBlocked(int col, int row) {
-        for (Tree t : trees.values()) {
+        for (Tree t : getTrees()) {
             if (t.isAlive()
                     && (int)(t.getX() / Constants.TILE_SIZE) == col
                     && (int)(t.getY() / Constants.TILE_SIZE) == row) {
@@ -277,7 +318,7 @@ public class ClientWorld {
             }
         }
 
-        for (Rock r : rocks.values()) {
+        for (Rock r : getRocks()) {
             if (r.isSolid()
                     && (int)(r.getX() / Constants.TILE_SIZE) == col
                     && (int)(r.getY() / Constants.TILE_SIZE) == row) {
@@ -286,5 +327,16 @@ public class ClientWorld {
         }
 
         return false;
+    }
+
+    private static <K, V> void updateSnapshot(AtomicReference<Map<K, V>> ref, Consumer<Map<K, V>> mutator) {
+        while (true) {
+            Map<K, V> current = ref.get();
+            Map<K, V> next = new LinkedHashMap<>(current);
+            mutator.accept(next);
+            if (ref.compareAndSet(current, next)) {
+                return;
+            }
+        }
     }
 }

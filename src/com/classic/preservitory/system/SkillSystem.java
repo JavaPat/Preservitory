@@ -20,23 +20,27 @@ public class SkillSystem {
     private final Map<String, Skill> skills = new LinkedHashMap<>();
 
     public SkillSystem() {
+        // Combat skills — must match server Skill enum names (lowercase lookup)
+        registerSkill(new Skill("Attack"));
+        registerSkill(new Skill("Strength"));
+        registerSkill(new Skill("Defence"));
+        registerSkill(new Skill("Hitpoints"));
+        registerSkill(new Skill("Magic"));
+        registerSkill(new Skill("Range"));
+        registerSkill(new Skill("Prayer"));
+        // Gathering skills
         registerSkill(new Skill("Woodcutting"));
         registerSkill(new Skill("Mining"));
+        registerSkill(new Skill("Fishing"));
+        // Artisan skills
+        registerSkill(new Skill("Cooking"));
+        registerSkill(new Skill("Crafting"));
+        registerSkill(new Skill("Fletching"));
+        registerSkill(new Skill("Smithing"));
     }
 
     private void registerSkill(Skill skill) {
         skills.put(skill.getName().toLowerCase(), skill);
-    }
-
-    /**
-     * Add XP to the named skill.
-     * Does nothing if the skill name is not registered.
-     */
-    public void addXp(String skillName, int amount) {
-        Skill skill = skills.get(skillName.toLowerCase());
-        if (skill != null) {
-            skill.addXp(amount);
-        }
     }
 
     /** Returns the Skill object for the given name, or null if not found. */

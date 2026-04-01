@@ -10,6 +10,10 @@ import com.classic.preservitory.client.world.EnemyData;
 import com.classic.preservitory.client.world.LootData;
 import com.classic.preservitory.client.world.NPCData;
 import com.classic.preservitory.client.world.ObjectStateData;
+import com.classic.preservitory.ui.quests.QuestEntry;
+import com.classic.preservitory.ui.quests.QuestState;
+import com.classic.preservitory.ui.shops.Shop;
+import com.classic.preservitory.ui.shops.ShopParser;
 import com.classic.preservitory.util.Constants;
 
 /**
@@ -32,8 +36,9 @@ public class ClientConnection {
     private Socket      socket;
     private PrintWriter out;
 
-    private volatile boolean connected = false;
-    private volatile String  myId      = null;
+    private volatile boolean connected            = false;
+    private volatile String  myId                 = null;
+    private volatile boolean intentionalDisconnect = false;
 
     // -----------------------------------------------------------------------
     //  Remote-player snapshot
@@ -63,6 +68,8 @@ public class ClientConnection {
     public interface Listener {
         void onConnected(String assignedId);
         void onDisconnected();
+        /** Called when the player voluntarily logs out (never shows "server offline"). */
+        default void onLoggedOut() {}
         default void onChat(String username, String role, String message) {}
     }
 
@@ -85,7 +92,8 @@ public class ClientConnection {
     private Consumer<Map<String, int[]>>     skillSnapshotListener;
     private Consumer<int[]>                  damageListener;
     private Consumer<DialogueData>           dialogueListener;
-    private Consumer<ShopData>               shopListener;
+    private Consumer<String>                 dialogueCloseListener;
+    private Consumer<Shop>                   shopListener;
     private Consumer<String>                 authSuccessListener;
     private Consumer<String>                 authFailureListener;
 
@@ -93,7 +101,22 @@ public class ClientConnection {
     private Consumer<Map<String, LootData>> lootUpdateListener;
     private Consumer<LootData>              lootAddListener;
     private Consumer<String>                lootRemoveListener;
-    private Consumer<Map<String, Integer>>  inventoryListener;
+    private Consumer<Map<Integer, Integer>>  inventoryListener;
+    private Consumer<int[][]>               inventorySlotListener;
+    private Consumer<Map<String, Integer>>   equipmentListener;
+    private Runnable                         stopActionListener;
+
+    // Quest event listeners
+    private Consumer<String>           questStartListener;
+    private Consumer<String>           questCompleteListener;
+    private Consumer<int[]>            questRewardListener;
+    private Consumer<String[]>         questXpListener;
+    private Consumer<List<QuestEntry>> questLogListener;
+    private Consumer<String[]>         questStageListener;
+    private Consumer<String>           questObjectiveCompleteListener;
+
+    // Dialogue options listener — fired when the server sends DIALOGUE_OPTIONS
+    private Consumer<String[]> dialogueOptionsListener;
 
     public void setListener(Listener l) { this.listener = l; }
 
@@ -133,7 +156,11 @@ public class ClientConnection {
         dialogueListener = l;
     }
 
-    public void setShopListener(Consumer<ShopData> l) {
+    public void setDialogueCloseListener(Consumer<String> l) {
+        dialogueCloseListener = l;
+    }
+
+    public void setShopListener(Consumer<Shop> l) {
         shopListener = l;
     }
 
@@ -148,13 +175,34 @@ public class ClientConnection {
     public void setLootUpdateListener   (Consumer<Map<String, LootData>> l) { lootUpdateListener    = l; }
     public void setLootAddListener      (Consumer<LootData>              l) { lootAddListener       = l; }
     public void setLootRemoveListener   (Consumer<String>                l) { lootRemoveListener    = l; }
-    public void setInventoryListener(Consumer<Map<String, Integer>> listener) {
+    public void setInventoryListener(Consumer<Map<Integer, Integer>> listener) {
         this.inventoryListener = listener;
     }
 
-    public void setInventoryUpdateListener(Consumer<Map<String, Integer>> listener) {
+    public void setInventoryUpdateListener(Consumer<Map<Integer, Integer>> listener) {
         setInventoryListener(listener);
     }
+
+    public void setInventorySlotListener(Consumer<int[][]> listener) {
+        this.inventorySlotListener = listener;
+    }
+
+    public void setStopActionListener(Runnable listener) {
+        this.stopActionListener = listener;
+    }
+
+    public void setEquipmentListener(Consumer<Map<String, Integer>> listener) {
+        this.equipmentListener = listener;
+    }
+
+    public void setQuestStartListener              (Consumer<String>           l) { questStartListener              = l; }
+    public void setQuestCompleteListener           (Consumer<String>           l) { questCompleteListener           = l; }
+    public void setQuestRewardListener             (Consumer<int[]>            l) { questRewardListener             = l; }
+    public void setQuestXpListener                 (Consumer<String[]>         l) { questXpListener                 = l; }
+    public void setQuestLogListener                (Consumer<List<QuestEntry>> l) { questLogListener                = l; }
+    public void setQuestStageListener              (Consumer<String[]>         l) { questStageListener              = l; }
+    public void setQuestObjectiveCompleteListener  (Consumer<String>           l) { questObjectiveCompleteListener  = l; }
+    public void setDialogueOptionsListener         (Consumer<String[]>         l) { dialogueOptionsListener         = l; }
 
     // -----------------------------------------------------------------------
     //  Connect
@@ -171,6 +219,7 @@ public class ClientConnection {
     private void connectAndListen() {
         while (!Thread.currentThread().isInterrupted()) {
             boolean wasConnected = false;
+            boolean wasLogout    = false;
             try {
                 socket = new Socket();
                 socket.connect(new InetSocketAddress(HOST, PORT), 3000);
@@ -190,22 +239,41 @@ public class ClientConnection {
                 }
 
             } catch (IOException e) {
-                System.out.println("[Client] Could not connect to server: " + e.getMessage());
+                if (!intentionalDisconnect) {
+                    System.out.println("[Client] Could not connect to server: " + e.getMessage());
+                }
             } finally {
+                // Snapshot and clear the flag atomically inside finally so we never
+                // miss a logout that races with an IOException.
+                wasLogout             = intentionalDisconnect;
+                intentionalDisconnect = false;
+
                 connected        = false;
                 updatesPerSecond = 0.0;
                 remotePlayers.clear();
                 myId             = null;
                 out              = null;
 
-                // Only notify if we had an established session (not failed initial attempts)
-                if (wasConnected && listener != null) listener.onDisconnected();
-
                 try { if (socket != null) socket.close(); } catch (IOException ignored) {}
                 socket = null;
+
+                // Fire the appropriate callback only when we had a live session.
+                if (wasConnected && listener != null) {
+                    if (wasLogout) {
+                        listener.onLoggedOut();
+                    } else {
+                        listener.onDisconnected();
+                    }
+                }
             }
 
-            // Wait before the next reconnect attempt
+            if (wasLogout) {
+                // Intentional logout — reconnect immediately so the login screen
+                // reappears as soon as the server accepts the new connection.
+                continue;
+            }
+
+            // Unexpected disconnect — wait before retrying.
             try {
                 Thread.sleep(RECONNECT_DELAY_MS);
             } catch (InterruptedException ie) {
@@ -213,6 +281,17 @@ public class ClientConnection {
                 break;
             }
         }
+    }
+
+    /**
+     * Cleanly disconnect from the server for logout.
+     * Fires {@link Listener#onLoggedOut()} instead of {@link Listener#onDisconnected()},
+     * then reconnects immediately so the login screen reappears without restarting.
+     */
+    public void disconnect() {
+        intentionalDisconnect = true;
+        connected = false;
+        try { if (socket != null) socket.close(); } catch (IOException ignored) {}
     }
 
     // -----------------------------------------------------------------------
@@ -326,8 +405,19 @@ public class ClientConnection {
                 dialogueListener.accept(dialogue);
             }
 
+        } else if (line.startsWith("DIALOGUE_CLOSE\t")) {
+            String npcId = line.substring(15).trim();
+            if (dialogueCloseListener != null) {
+                dialogueCloseListener.accept(npcId);
+            }
+
+        } else if (line.startsWith("DIALOGUE_OPTIONS\t")) {
+            // Split on \t — each tab-separated token after the header is one option text
+            String[] options = line.substring(17).split("\t", -1);
+            if (dialogueOptionsListener != null) dialogueOptionsListener.accept(options);
+
         } else if (line.startsWith("SHOP\t")) {
-            ShopData shop = parseShop(line);
+            Shop shop = ShopParser.parse(line);
             if (shop != null && shopListener != null) {
                 shopListener.accept(shop);
             }
@@ -356,15 +446,78 @@ public class ClientConnection {
             LootData d = parseLootAdd(line.substring(9).trim());
             if (d != null && lootAddListener != null) lootAddListener.accept(d);
 
+        } else if (line.startsWith("GROUND_ITEM_ADD ")) {
+            LootData d = parseLootAdd(line.substring(16).trim());
+            if (d != null && lootAddListener != null) lootAddListener.accept(d);
+
         } else if (line.startsWith("LOOT_REMOVE ")) {
             String id = line.substring(12).trim();
             if (lootRemoveListener != null) lootRemoveListener.accept(id);
 
+        } else if (line.startsWith("GROUND_ITEM_REMOVE ")) {
+            String id = line.substring(19).trim();
+            if (lootRemoveListener != null) lootRemoveListener.accept(id);
+
+        // ---- Quest feedback messages ----
+        } else if (line.startsWith("QUEST_START\t")) {
+            if (questStartListener != null) questStartListener.accept(line.substring(12));
+
+        } else if (line.startsWith("QUEST_COMPLETE\t")) {
+            if (questCompleteListener != null) questCompleteListener.accept(line.substring(15));
+
+        } else if (line.startsWith("QUEST_REWARD\t")) {
+            if (questRewardListener != null) {
+                String[] parts = line.split("\t", 3);
+                if (parts.length == 3) {
+                    try {
+                        int itemId = Integer.parseInt(parts[1]);
+                        int amount = Integer.parseInt(parts[2]);
+                        questRewardListener.accept(new int[]{itemId, amount});
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+
+        } else if (line.startsWith("QUEST_XP\t")) {
+            if (questXpListener != null) {
+                String[] parts = line.split("\t", 3);
+                if (parts.length == 3) questXpListener.accept(new String[]{parts[1], parts[2]});
+            }
+
+        } else if (line.startsWith("QUEST_LOG\t")) {
+            if (questLogListener != null) {
+                questLogListener.accept(parseQuestLog(line.substring(10)));
+            }
+
+        } else if (line.startsWith("QUEST_STAGE\t")) {
+            if (questStageListener != null) {
+                String[] parts = line.split("\t", 3);
+                if (parts.length == 3) questStageListener.accept(new String[]{parts[1], parts[2]});
+            }
+
+        } else if (line.startsWith("QUEST_OBJECTIVE_COMPLETE\t")) {
+            if (questObjectiveCompleteListener != null) {
+                questObjectiveCompleteListener.accept(line.substring(25));
+            }
+
         // ---- Inventory messages ----
+        } else if (line.startsWith("INVENTORY_UPDATE")) {
+            String payload = line.length() > 16 ? line.substring(17) : "";
+            int[][] slots = parseInventorySlots(payload);
+            if (inventorySlotListener != null) inventorySlotListener.accept(slots);
+
+        } else if (line.startsWith("STOP_ACTION")) {
+            if (stopActionListener != null) stopActionListener.run();
+
         } else if (line.startsWith("INVENTORY")) {
             String payload = line.length() > 9 ? line.substring(10) : "";
-            Map<String, Integer> inv = parseInventory(payload);
+            Map<Integer, Integer> inv = parseInventory(payload);
             if (inventoryListener != null) inventoryListener.accept(inv);
+
+        // ---- Equipment messages ----
+        } else if (line.startsWith("EQUIPMENT")) {
+            String payload = line.length() > 9 ? line.substring(10) : "";
+            Map<String, Integer> eq = parseEquipment(payload);
+            if (equipmentListener != null) equipmentListener.accept(eq);
         }
     }
 
@@ -483,26 +636,49 @@ public class ClientConnection {
         return result;
     }
 
-    private Map<String, Integer> parseInventory(String payload) {
-        Map<String, Integer> map = new HashMap<>();
-
-        if (payload == null || payload.isEmpty()) return map;
-
-        String[] entries = payload.split(";");
-        for (String entry : entries) {
+    /**
+     * Parse an {@code INVENTORY_UPDATE} payload.
+     * Format: {@code slot:itemId:amount ...} (28 space-separated entries).
+     *
+     * @return 28-element array of {@code [itemId, amount]}; empty slots have itemId=-1.
+     */
+    private int[][] parseInventorySlots(String payload) {
+        int[][] result = new int[28][2];
+        for (int[] entry : result) { entry[0] = -1; entry[1] = 0; }
+        if (payload == null || payload.isEmpty()) return result;
+        for (String entry : payload.split(" ")) {
             entry = entry.trim();
             if (entry.isEmpty()) continue;
-
             String[] parts = entry.split(":");
-            if (parts.length != 2) continue;
-
-            String item = parts[0].trim();
+            if (parts.length != 3) continue;
             try {
-                int amount = Integer.parseInt(parts[1].trim());
-                map.put(item, amount);
+                int idx    = Integer.parseInt(parts[0]);
+                int itemId = Integer.parseInt(parts[1]);
+                int amount = Integer.parseInt(parts[2]);
+                if (idx >= 0 && idx < 28) {
+                    result[idx][0] = itemId;
+                    result[idx][1] = amount;
+                }
             } catch (NumberFormatException ignored) {}
         }
+        return result;
+    }
 
+    private Map<Integer, Integer> parseInventory(String payload) {
+        Map<Integer, Integer> map = new HashMap<>();
+        if (payload == null || payload.isEmpty()) return map;
+
+        for (String entry : payload.split(";")) {
+            entry = entry.trim();
+            if (entry.isEmpty()) continue;
+            String[] parts = entry.split(":");
+            if (parts.length != 2) continue;
+            try {
+                int itemId = Integer.parseInt(parts[0].trim());
+                int amount = Integer.parseInt(parts[1].trim());
+                map.put(itemId, amount);
+            } catch (NumberFormatException ignored) {}
+        }
         return map;
     }
 
@@ -538,39 +714,66 @@ public class ClientConnection {
         return result;
     }
 
-    private DialogueData parseDialogue(String line) {
-        String[] parts = line.split("\t", 4);
-        if (parts.length != 4) return null;
-
-        String npcId = parts[1];
-        boolean openShop = "1".equals(parts[2]);
-        String[] lines = parts[3].isEmpty() ? new String[0] : parts[3].split("\\|", -1);
-        return new DialogueData(npcId, lines, openShop);
-    }
-
-    private ShopData parseShop(String line) {
-        String[] parts = line.split("\t", 3);
-        if (parts.length != 3) return null;
-        return new ShopData(parsePriceMap(parts[1]), parsePriceMap(parts[2]));
-    }
-
-    private LinkedHashMap<String, Integer> parsePriceMap(String payload) {
-        LinkedHashMap<String, Integer> map = new LinkedHashMap<>();
-        if (payload == null || payload.isEmpty()) return map;
-
-        for (String entry : payload.split(";")) {
+    /**
+     * Parse a QUEST_LOG payload.
+     *
+     * New format (7 fields): {@code questId:name:state:stageId:progressAmount:requiredAmount:stageDesc|...}
+     * Old format (5 fields): {@code questId:name:state:stageId:stageDesc|...}
+     * Legacy format (3 fields): {@code questId:name:state|...}
+     *
+     * Unknown quest IDs or states are skipped safely.
+     * stageDesc is the last field and may contain ':'.
+     */
+    private List<QuestEntry> parseQuestLog(String payload) {
+        List<QuestEntry> result = new ArrayList<>();
+        if (payload == null || payload.isEmpty()) return result;
+        for (String entry : payload.split("\\|")) {
             entry = entry.trim();
             if (entry.isEmpty()) continue;
-
-            String[] parts = entry.split(":");
-            if (parts.length != 2) continue;
-
+            // Split with limit=7 so stageDesc (last field) can contain ':'
+            String[] parts = entry.split(":", 7);
+            if (parts.length < 3) continue;
             try {
-                map.put(parts[0].trim(), Integer.parseInt(parts[1].trim()));
+                int questId = Integer.parseInt(parts[0].trim());
+                String name = parts[1].trim();
+                QuestState state;
+                try {
+                    state = QuestState.valueOf(parts[2].trim());
+                } catch (IllegalArgumentException ignored) {
+                    state = QuestState.NOT_STARTED;
+                }
+                int    stageId  = parts.length >= 4 ? parseInt(parts[3].trim(), 0) : 0;
+                int    progress = 0;
+                int    required = 0;
+                String desc     = "";
+                if (parts.length >= 7) {
+                    // New 7-field format
+                    progress = parseInt(parts[4].trim(), 0);
+                    required = parseInt(parts[5].trim(), 0);
+                    desc     = parts[6].trim();
+                } else if (parts.length == 5) {
+                    // Old 5-field format — no progress fields
+                    desc = parts[4].trim();
+                }
+                result.add(new QuestEntry(questId, name, state, stageId, desc, progress, required));
             } catch (NumberFormatException ignored) {}
         }
-        return map;
+        return result;
     }
+
+    private static int parseInt(String s, int fallback) {
+        try { return Integer.parseInt(s); } catch (NumberFormatException e) { return fallback; }
+    }
+
+    private DialogueData parseDialogue(String line) {
+        String[] parts = line.split("\t", 3);
+        if (parts.length != 3) return null;
+
+        String npcId = parts[1];
+        String text  = parts[2];
+        return new DialogueData(npcId, text);
+    }
+
 
     private int[] parseDamage(String payload) {
         String[] parts = payload.split(" ");
@@ -626,9 +829,14 @@ public class ClientConnection {
         out.println("ATTACK " + enemyId);
     }
 
+    public void sendCombatStyle(String style) {
+        if (!connected || out == null) return;
+        out.println("COMBAT_STYLE " + style);
+    }
+
     public void sendPickup(String lootId) {
         if (!connected || out == null) return;
-        out.println("PICKUP " + lootId);
+        out.println("PICKUP_ITEM " + lootId);
     }
 
     public void sendTalk(String npcId) {
@@ -646,19 +854,49 @@ public class ClientConnection {
         out.println("REGISTER " + username + " " + password);
     }
 
-    public void sendBuy(String itemName) {
+    public void sendBuy(int itemId) {
         if (!connected || out == null) return;
-        out.println("BUY " + itemName);
+        out.println("BUY " + itemId);
     }
 
-    public void sendSell(String itemName) {
+    public void sendSell(int itemId) {
         if (!connected || out == null) return;
-        out.println("SELL " + itemName);
+        out.println("SELL " + itemId);
     }
 
     public void sendShopClose() {
         if (!connected || out == null) return;
         out.println("SHOP_CLOSE");
+    }
+
+    public void sendEquip(int itemId) {
+        if (!connected || out == null) return;
+        out.println("EQUIP " + itemId);
+    }
+
+    public void sendUse(int itemId) {
+        if (!connected || out == null) return;
+        out.println("USE " + itemId);
+    }
+
+    public void sendDrop(int itemId) {
+        if (!connected || out == null) return;
+        out.println("DROP " + itemId);
+    }
+
+    public void sendUnequip(String slot) {
+        if (!connected || out == null) return;
+        out.println("UNEQUIP " + slot);
+    }
+
+    public void sendDialogueNext() {
+        if (!connected || out == null) return;
+        out.println("DIALOGUE_NEXT");
+    }
+
+    public void sendDialogueOption(int index) {
+        if (!connected || out == null) return;
+        out.println("DIALOGUE_OPTION\t" + index);
     }
 
     // -----------------------------------------------------------------------
@@ -689,12 +927,12 @@ public class ClientConnection {
             String[] parts = entry.split(" ");
             if (parts.length != 5) continue;
             try {
-                String id    = parts[0];
-                int    x     = Integer.parseInt(parts[1]);
-                int    y     = Integer.parseInt(parts[2]);
-                String name  = parts[3];
-                int    count = Integer.parseInt(parts[4]);
-                result.put(id, new LootData(id, x, y, name, count));
+                String id     = parts[0];
+                int    x      = Integer.parseInt(parts[1]);
+                int    y      = Integer.parseInt(parts[2]);
+                int    itemId = Integer.parseInt(parts[3]);
+                int    count  = Integer.parseInt(parts[4]);
+                result.put(id, new LootData(id, x, y, itemId, count));
             } catch (NumberFormatException ignored) {}
         }
         return result;
@@ -702,43 +940,50 @@ public class ClientConnection {
 
     /**
      * Parse a {@code LOOT_ADD} payload (everything after "LOOT_ADD ").
-     * Format: {@code id x y name count}
+     * Format: {@code id x y itemId count}
      */
     private LootData parseLootAdd(String payload) {
         String[] parts = payload.split(" ");
         if (parts.length != 5) return null;
         try {
-            String id    = parts[0];
-            int    x     = Integer.parseInt(parts[1]);
-            int    y     = Integer.parseInt(parts[2]);
-            String name  = parts[3];
-            int    count = Integer.parseInt(parts[4]);
-            return new LootData(id, x, y, name, count);
+            String id     = parts[0];
+            int    x      = Integer.parseInt(parts[1]);
+            int    y      = Integer.parseInt(parts[2]);
+            int    itemId = Integer.parseInt(parts[3]);
+            int    count  = Integer.parseInt(parts[4]);
+            return new LootData(id, x, y, itemId, count);
         } catch (NumberFormatException ignored) {
             return null;
         }
     }
 
+    /**
+     * Parse an {@code EQUIPMENT} payload.
+     * Format: {@code SLOT:itemId;SLOT:itemId;} — trailing semi is fine.
+     */
+    private Map<String, Integer> parseEquipment(String payload) {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        if (payload == null || payload.isEmpty()) return map;
+        for (String entry : payload.split(";")) {
+            entry = entry.trim();
+            if (entry.isEmpty()) continue;
+            String[] parts = entry.split(":");
+            if (parts.length != 2) continue;
+            try {
+                map.put(parts[0].trim(), Integer.parseInt(parts[1].trim()));
+            } catch (NumberFormatException ignored) {}
+        }
+        return map;
+    }
+
     public static final class DialogueData {
         public final String npcId;
-        public final String[] lines;
-        public final boolean openShop;
+        public final String line;
 
-        public DialogueData(String npcId, String[] lines, boolean openShop) {
+        public DialogueData(String npcId, String line) {
             this.npcId = npcId;
-            this.lines = lines;
-            this.openShop = openShop;
+            this.line  = line;
         }
     }
 
-    public static final class ShopData {
-        public final LinkedHashMap<String, Integer> stockPrices;
-        public final LinkedHashMap<String, Integer> sellPrices;
-
-        public ShopData(LinkedHashMap<String, Integer> stockPrices,
-                        LinkedHashMap<String, Integer> sellPrices) {
-            this.stockPrices = stockPrices;
-            this.sellPrices = sellPrices;
-        }
-    }
 }

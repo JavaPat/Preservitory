@@ -1,5 +1,7 @@
 package com.classic.preservitory.entity;
 
+import com.classic.preservitory.client.definitions.ItemDefinition;
+import com.classic.preservitory.client.definitions.ItemDefinitionManager;
 import com.classic.preservitory.item.Inventory;
 import com.classic.preservitory.item.Item;
 import com.classic.preservitory.system.SkillSystem;
@@ -63,13 +65,22 @@ public class Player extends Entity {
     private final SkillSystem          skillSystem;
 
     // -----------------------------------------------------------------------
+    //  Equipment
+    // -----------------------------------------------------------------------
+
+    /** Slot name (e.g. "WEAPON") → itemId. Updated by server EQUIPMENT packets. */
+    private final Map<String, Integer> equipment = new HashMap<>();
+
+    // -----------------------------------------------------------------------
     //  Combat stats
     // -----------------------------------------------------------------------
 
-    private int attackLevel   = 5;
-    private int strengthLevel = 5;
-    private int defenceLevel  = 5;
-    private int maxHp         = 25;
+    // Defaults match the server's starting values (combat skills start at level 3).
+    // These are overwritten by the SKILLS snapshot sent on login.
+    private int attackLevel   = 3;
+    private int strengthLevel = 3;
+    private int defenceLevel  = 3;
+    private int maxHp         = 15; // level 3 × 5
     private int hp;
 
     // -----------------------------------------------------------------------
@@ -165,34 +176,41 @@ public class Player extends Entity {
         }
     }
 
+    /** Apply a server-authoritative equipment snapshot. Pass null to clear. */
+    public void applyEquipmentUpdate(Map<String, Integer> snapshot) {
+        equipment.clear();
+        if (snapshot != null) equipment.putAll(snapshot);
+    }
+
+    public Map<String, Integer> getEquipment() { return equipment; }
+
+    public int getEquippedItemId(String slot) {
+        return equipment.getOrDefault(slot, -1);
+    }
+
     /** True when HP has reached zero. */
     public boolean isDead() { return hp <= 0; }
 
     /**
-     * Apply a full server-authoritative inventory snapshot.
-     * The map is the source of truth; the Inventory object is rebuilt so
-     * existing UI code can continue rendering without local mutation paths.
+     * Apply a full server-authoritative slot-based inventory snapshot.
+     *
+     * <p>{@code slotData} is a 28-element array where each entry is
+     * {@code [itemId, amount]}.  An itemId of -1 (or ≤ 0) means the slot is empty.</p>
      */
-    public void applyInventoryUpdate(Map<String, Integer> newInventory) {
-        inventoryState.clear();
+    public void applyInventorySlots(int[][] slotData) {
         inventory.clear();
+        inventoryState.clear();
 
-        if (newInventory == null || newInventory.isEmpty()) {
-            return;
-        }
+        for (int i = 0; i < slotData.length && i < 28; i++) {
+            int itemId = slotData[i][0];
+            int amount = slotData[i][1];
+            if (itemId <= 0 || amount <= 0) continue;
 
-        for (Map.Entry<String, Integer> entry : newInventory.entrySet()) {
-            String itemName = entry.getKey();
-            Integer amount = entry.getValue();
-            if (itemName == null || itemName.isEmpty() || amount == null || amount <= 0) {
-                continue;
-            }
-
-            inventoryState.put(itemName, amount);
-
-            Item item = new Item(itemName, true);
+            ItemDefinition def = ItemDefinitionManager.get(itemId);
+            Item item = new Item(itemId, def.name, def.stackable);
             item.setCount(amount);
-            inventory.addItem(item);
+            inventory.setSlot(i, item);
+            inventoryState.merge(def.name, amount, Integer::sum);
         }
     }
 

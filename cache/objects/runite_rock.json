@@ -1,0 +1,8 @@
+{
+  "id": "runite_rock",
+  "category": "rock",
+  "width": 32,
+  "height": 32,
+  "blocksMovement": true,
+  "respawnMs": 50000
+}

@@ -2,7 +2,7 @@ package com.classic.preservitory.cache;
 
 import java.io.*;
 import java.net.HttpURLConnection;
-import java.net.URL;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -49,7 +49,7 @@ public class CacheDownloader {
     // -----------------------------------------------------------------------
 
     private static void downloadCache(ProgressListener listener) throws IOException {
-        HttpURLConnection connection = (HttpURLConnection) new URL(CacheConfig.CACHE_URL).openConnection();
+        HttpURLConnection connection = (HttpURLConnection) URI.create(CacheConfig.CACHE_URL).toURL().openConnection();
         connection.setConnectTimeout(10_000);
         connection.setReadTimeout(30_000);
         connection.setInstanceFollowRedirects(true);

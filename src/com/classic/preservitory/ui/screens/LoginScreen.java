@@ -1,5 +1,7 @@
 package com.classic.preservitory.ui.screens;
 
+import com.classic.preservitory.system.audio.MusicManager;
+import com.classic.preservitory.ui.framework.components.MusicToggleButton;
 import com.classic.preservitory.ui.framework.components.UIButton;
 import com.classic.preservitory.ui.framework.components.UITextField;
 import com.classic.preservitory.ui.framework.assets.AssetManager;
@@ -53,10 +55,11 @@ public class LoginScreen {
     //  Components
     // -----------------------------------------------------------------------
 
-    private final UITextField usernameField;
-    private final UITextField passwordField;
-    private final UIButton    submitButton;
-    private final UIButton    toggleButton;
+    private final UITextField      usernameField;
+    private final UITextField      passwordField;
+    private final UIButton         submitButton;
+    private final UIButton         toggleButton;
+    private final MusicToggleButton musicButton;
 
     // -----------------------------------------------------------------------
     //  State
@@ -88,7 +91,8 @@ public class LoginScreen {
 
     public LoginScreen(int screenW, int screenH,
                        BiConsumer<String, String> onLogin,
-                       BiConsumer<String, String> onRegister) {
+                       BiConsumer<String, String> onRegister,
+                       MusicManager musicManager) {
         this.screenW    = screenW;
         this.screenH    = screenH;
         this.onLogin    = onLogin;
@@ -122,6 +126,15 @@ public class LoginScreen {
         toggleButton  = new UIButton(fieldX, tY, fieldW, TOGGLE_H, "Create a new account instead", this::toggleMode);
         toggleBtnY = tY;
 
+        // Music toggle — bottom-right corner, 32×32
+        int btnSize = 32;
+        musicButton = new MusicToggleButton(
+                screenW - btnSize - 10,
+                screenH - btnSize - 10,
+                btnSize,
+                musicManager
+        );
+
         usernameField.setFocused(true);
     }
 
@@ -142,6 +155,7 @@ public class LoginScreen {
         passwordField.render(g);
         drawSubmitButton(g);
         toggleButton.render(g);
+        musicButton.render(g);
 
         drawStatus(g);
     }
@@ -156,11 +170,13 @@ public class LoginScreen {
         }
         submitButton.handleClick(x, y);
         toggleButton.handleClick(x, y);
+        musicButton.handleClick(x, y);
     }
 
     public void handleMouseMove(int x, int y) {
         submitButton.handleMouseMove(x, y);
         toggleButton.handleMouseMove(x, y);
+        musicButton.handleMouseMove(x, y);
     }
 
     public void handleKey(int keyCode) {

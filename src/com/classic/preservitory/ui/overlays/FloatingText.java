@@ -35,10 +35,10 @@ public class FloatingText {
     public final Color color;
     public float alpha;
 
-    private double timer;
+    protected double timer;
 
-    private static final double LIFETIME = 1.2;
-    private static final double FLOAT_SPEED = 32.0;
+    protected static final double LIFETIME = 1.2;
+    protected static final double FLOAT_SPEED = 32.0;
 
     // -----------------------------------------------------------------------
     //  Construction

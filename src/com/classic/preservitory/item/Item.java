@@ -1,50 +1,33 @@
 package com.classic.preservitory.item;
 
 /**
- * Represents one kind of item.
+ * One item stack in the player's inventory.
  *
- * Stackable items (like Logs) share a single inventory slot and track
- * how many are in the stack via a count.
+ * Authoritative identifier: {@link #itemId} (int).
+ * Display name: {@link #name} — populated from ItemDefinitionManager on receipt.
  *
- * Non-stackable items (armour, tools, etc.) each occupy their own slot
- * with count always equal to 1.
+ * Stackable items share a slot; non-stackable items each occupy their own slot.
  */
 public class Item {
 
+    private final int     itemId;
     private final String  name;
     private final boolean stackable;
     private       int     count;
 
-    public Item(String name, boolean stackable) {
+    public Item(int itemId, String name, boolean stackable) {
+        this.itemId    = itemId;
         this.name      = name;
         this.stackable = stackable;
         this.count     = 1;
     }
 
-    /**
-     * Increase this stack by one.
-     * Only meaningful when stackable == true.
-     */
-    public void incrementCount() {
-        count++;
-    }
+    public void incrementCount()      { count++;                           }
+    public void addCount(int amount)  { count += amount;                   }
+    public void setCount(int count)   { this.count = Math.max(0, count);   }
 
-    /**
-     * Increase this stack by the given amount.
-     * Used when merging a multi-count loot drop into an existing stack.
-     */
-    public void addCount(int amount) {
-        count += amount;
-    }
-
-    /**
-     * Set the count directly — used when loading a save file.
-     */
-    public void setCount(int count) { this.count = Math.max(0, count); }
-
-    // --- Getters ---
-
-    public String  getName()     { return name; }
-    public boolean isStackable() { return stackable; }
-    public int     getCount()    { return count; }
+    public int     getItemId()    { return itemId;    }
+    public String  getName()      { return name;      }
+    public boolean isStackable()  { return stackable; }
+    public int     getCount()     { return count;     }
 }
