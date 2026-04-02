@@ -34,7 +34,7 @@ public class UIButton extends UIComponent {
         g.drawRect(x, y, width, height);
 
         // --- Text ---
-        g.setFont(new Font("Monospaced", Font.BOLD, 12));
+        g.setFont(new Font("Arial", Font.BOLD, 12));
         FontMetrics fm = g.getFontMetrics();
 
         int textWidth = fm.stringWidth(text);

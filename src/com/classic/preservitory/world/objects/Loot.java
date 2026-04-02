@@ -4,12 +4,14 @@ import com.classic.preservitory.client.definitions.ItemDefinition;
 import com.classic.preservitory.client.definitions.ItemDefinitionManager;
 import com.classic.preservitory.client.definitions.ItemIds;
 import com.classic.preservitory.entity.Entity;
+import com.classic.preservitory.ui.framework.assets.AssetManager;
 import com.classic.preservitory.util.Constants;
 import com.classic.preservitory.util.IsoUtils;
 
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics;
+import java.awt.Graphics2D;
 
 /**
  * A ground-loot item dropped by an enemy and waiting to be picked up.
@@ -35,36 +37,43 @@ public class Loot extends Entity {
     public int    getCount()  { return count;  }
 
     public boolean containsPoint(int px, int py) {
-        return px >= x && px <= x + width && py >= y && py <= y + height;
+        int pad = 12;
+        return px >= x - pad && px <= x + width  + pad
+            && py >= y - pad && py <= y + height + pad;
     }
 
     @Override
     public void render(Graphics g) {
+        Graphics2D g2 = (Graphics2D) g;
+
         int isoX = IsoUtils.worldToIsoX(x, y);
         int isoY = IsoUtils.worldToIsoY(x, y);
 
         int cx = isoX + IsoUtils.ISO_TILE_W / 2;
         int cy = isoY + IsoUtils.ISO_TILE_H / 2 + 4;
 
-        boolean isCoins = (itemId == ItemIds.COINS);
-        Color fill   = isCoins ? new Color(255, 210, 0)   : new Color(90, 185, 80);
-        Color border = isCoins ? new Color(180, 140, 0)   : new Color(50, 120, 40);
-        Color shadow = new Color(0, 0, 0, 55);
+        // Ground shadow (drawn under every item type)
+        g2.setColor(new Color(0, 0, 0, 55));
+        g2.fillOval(cx - 7, cy - 3, 14, 7);
 
-        g.setColor(shadow);
-        g.fillOval(cx - 7, cy - 3, 14, 7);
-        g.setColor(fill);
-        g.fillOval(cx - 6, cy - 8, 12, 9);
-        g.setColor(border);
-        g.drawOval(cx - 6, cy - 8, 12, 9);
+        if (itemId == ItemIds.COINS) {
+            // OSRS-style coin stack sprite + formatted amount.
+            // Pass (cx, cy) as the tile centre; drawCoinStack centres the icon there.
+            AssetManager.drawCoinStack(g2, count, cx, cy, false);
+        } else {
+            // Non-coin: pale-green oval with a short name label
+            g2.setColor(new Color(90, 185, 80));
+            g2.fillOval(cx - 6, cy - 8, 12, 9);
+            g2.setColor(new Color(50, 120, 40));
+            g2.drawOval(cx - 6, cy - 8, 12, 9);
 
-        // Label: stack count if > 1, else first 3 chars of item name
-        String displayName = ItemDefinitionManager.get(itemId).name;
-        String label = count > 1
-                ? String.valueOf(count)
-                : displayName.substring(0, Math.min(3, displayName.length()));
-        g.setFont(new Font("Monospaced", Font.BOLD, 7));
-        g.setColor(Color.BLACK);
-        g.drawString(label, cx - 5, cy - 1);
+            String displayName = ItemDefinitionManager.get(itemId).name;
+            String label = count > 1
+                    ? String.valueOf(count)
+                    : displayName.substring(0, Math.min(3, displayName.length()));
+            g2.setFont(new Font("Arial", Font.BOLD, 7));
+            g2.setColor(Color.BLACK);
+            g2.drawString(label, cx - 5, cy - 1);
+        }
     }
 }

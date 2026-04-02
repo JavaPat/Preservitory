@@ -1,13 +1,19 @@
 package com.classic.preservitory.ui.panels;
 
 import com.classic.preservitory.client.definitions.ItemDefinitionManager;
+import com.classic.preservitory.client.editor.EditorActions;
+import com.classic.preservitory.client.editor.EditorObject;
+import com.classic.preservitory.client.editor.EditorState;
+import com.classic.preservitory.client.settings.ClientSettings;
 import com.classic.preservitory.client.world.ClientWorld;
+import com.classic.preservitory.client.world.map.TileMap;
 import com.classic.preservitory.entity.Animation;
 import com.classic.preservitory.entity.Player;
 import com.classic.preservitory.entity.RemotePlayer;
 import com.classic.preservitory.game.GameLoop;
 import com.classic.preservitory.input.MouseHandler;
 import com.classic.preservitory.network.ClientConnection;
+import com.classic.preservitory.system.AttackSystem;
 import com.classic.preservitory.system.CombatSystem;
 import com.classic.preservitory.system.MiningSystem;
 import com.classic.preservitory.system.MovementSystem;
@@ -15,6 +21,7 @@ import com.classic.preservitory.system.SoundSystem;
 import com.classic.preservitory.system.WoodcuttingSystem;
 import com.classic.preservitory.system.audio.MusicManager;
 import com.classic.preservitory.ui.framework.assets.AssetManager;
+import com.classic.preservitory.ui.framework.assets.PlayerSpriteManager;
 import com.classic.preservitory.ui.overlays.ChatBox;
 import com.classic.preservitory.ui.overlays.FloatingText;
 import com.classic.preservitory.ui.quests.QuestCompleteWindow;
@@ -58,65 +65,87 @@ public class GamePanel extends JPanel {
     //  Game state (package-private — accessed by GameInputHandler/GameRenderer)
     // -----------------------------------------------------------------------
 
-    enum GameState { PLAYING, IN_DIALOGUE }
+    enum ClientState {
+        LOGIN, LOGGING_IN, LOADING, IN_GAME
+    }
+    ClientState clientState = ClientState.LOGIN;
+
+    enum GameState {
+        PLAYING, IN_DIALOGUE
+    }
     GameState gameState = GameState.PLAYING;
 
     // -----------------------------------------------------------------------
     //  Layout constants (package-private — used by input handler and renderer)
     // -----------------------------------------------------------------------
 
-    static final int    CHAT_H                = 88;
-    static final int    LOGOUT_BTN_H          = 18;
-    static final int    LOGOUT_BTN_Y          = Constants.SCREEN_HEIGHT - LOGOUT_BTN_H - 2;
-    static final int    LOGOUT_BTN_X          = Constants.PANEL_X + 4;
-    static final int    LOGOUT_BTN_W          = Constants.PANEL_W - 8;
+    static final int CHAT_H = 88;
+    static final int LOGOUT_BTN_H = 18;
     static final double LOGOUT_CONFIRM_TIMEOUT = 3.0;
-    static final int    CONTEXT_MENU_OPTION_H = 18;
-    static final int    XP_TRACKER_X          = Constants.VIEWPORT_W - 160;
-    static final int    XP_TRACKER_Y          = 12;
-    static final int    XP_DROP_START_X       = Constants.PANEL_X - 60;
-    static final int    XP_DROP_START_Y       = 150;
+    static final int CONTEXT_MENU_OPTION_H = 18;
+    static final int XP_TRACKER_Y = 12;
+    static final int XP_DROP_START_Y = 150;
+    static final long PANEL_HOVER_SUPPRESS_MS = 120L;
+
+    // Dynamic layout — depend on current window size; use methods not static fields
+    int getPanelX()     { return getWidth() - Constants.PANEL_W; }
+    int getViewportW()  { return getWidth() - Constants.PANEL_W; }
+    int getLogoutBtnX() { return getPanelX() + 4; }
+    int getLogoutBtnY() { return getHeight() - LOGOUT_BTN_H - 2; }
+    int getLogoutBtnW() { return Constants.PANEL_W - 8; }
+    int getXpTrackerX() { return getPanelX() - 140; }
 
     // -----------------------------------------------------------------------
     //  Core game objects (package-private — accessed by renderer/input handler)
     // -----------------------------------------------------------------------
 
-    final World             world;
-    final Player            player;
-    final MouseHandler      mouseHandler;
+    final World world;
+    final Player player;
+    final MouseHandler mouseHandler;
     final MovementSystem    movementSystem;
     final WoodcuttingSystem woodcuttingSystem;
     final MiningSystem      miningSystem;
     final CombatSystem      combatSystem;
+    final AttackSystem      attackSystem;
     final SoundSystem       soundSystem;
 
     private MusicManager musicManager;
     private final GameLoop gameLoop;
+
+
+    private TileMap tileMap = new TileMap(64, 64);
+
+    private int hoveredTileX = -1;
+    private int hoveredTileY = -1;
+
+    final EditorState editorState = new EditorState();
+    final EditorActions editorActions = new EditorActions();
 
     // -----------------------------------------------------------------------
     //  Networking (package-private)
     // -----------------------------------------------------------------------
 
     final ClientConnection clientConnection = new ClientConnection();
-    final ClientWorld      clientWorld      = new ClientWorld();
+    final ClientWorld clientWorld = new ClientWorld();
+    final ClientSettings settings;
     volatile Map<String, RemotePlayer> remotePlayers = Collections.emptyMap();
 
     // -----------------------------------------------------------------------
     //  UI components (package-private)
     // -----------------------------------------------------------------------
 
-    final RightPanel         rightPanel         = new RightPanel();
-    final ChatBox            chatBox            = new ChatBox();
-    ShopWindow               shopWindow;
-    QuestCompleteWindow      questCompleteWindow;
-    LoginScreen              loginScreen;
+    final RightPanel rightPanel;
+    final ChatBox chatBox = new ChatBox();
+    ShopWindow shopWindow;
+    QuestCompleteWindow questCompleteWindow;
+    LoginScreen loginScreen;
 
     // -----------------------------------------------------------------------
     //  Camera (package-private — set by GameRenderer, read by GameInputHandler)
     // -----------------------------------------------------------------------
 
-    int    cameraOffsetX    = 0;
-    int    cameraOffsetY    = 0;
+    int cameraOffsetX = 0;
+    int cameraOffsetY = 0;
     /** Persistent zoom-pan offset accumulated by mouse-centred zoom and middle-mouse pan. */
     double cameraZoomOffsetX = 0.0;
     double cameraZoomOffsetY = 0.0;
@@ -125,35 +154,43 @@ public class GamePanel extends JPanel {
     //  Middle-mouse pan state
     // -----------------------------------------------------------------------
 
-    private boolean panDragging   = false;
-    private int     panLastMouseX = 0;
-    private int     panLastMouseY = 0;
+    private boolean panDragging = false;
+    private int panLastMouseX = 0;
+    private int panLastMouseY = 0;
 
     // -----------------------------------------------------------------------
     //  HUD / feedback state (package-private — read by GameRenderer)
     // -----------------------------------------------------------------------
 
-    String  actionMessage = "";
-    String  hoverText     = "";
-    double  messageTimer  = 0;
+    String actionMessage = "";
+    String hoverText = "";
+    double messageTimer = 0;
     final List<FloatingText> floatingTexts = new ArrayList<>();
     final List<XpDrop> xpDrops = new ArrayList<>();
     final List<ContextMenuOption> contextMenuOptions = new ArrayList<>();
     boolean contextMenuOpen = false;
     int contextMenuX = 0;
     int contextMenuY = 0;
+    final Rectangle settingsCogBounds = new Rectangle();
     long totalXp = 0L;
-    int     displayedFps;
+    int displayedFps;
     String  currentAccountName = "";
-    boolean debugMode          = false;
-    boolean authRequired       = true;
-
+    boolean debugMode = false;
+    long ignoreHoverUntil = 0L;
+    float fadeAlpha = 0f;
+    boolean fadingIn = false;
+    boolean fadingOut = false;
+    private static final float FADE_SPEED = 4.0f;
+    private static final double MIN_LOADING_DISPLAY_SECONDS = 0.15;
+    private boolean pendingEnterGame = false;
+    private double loadingOverlayTimer = 0.0;
     // -----------------------------------------------------------------------
     //  Zoom
     // -----------------------------------------------------------------------
 
-    private double zoom       = 1.0;
+    private double zoom = 1.0;
     private double targetZoom = 1.0;
+    private boolean recenterCameraOnZoomIn = false;
 
     public double getZoom() { return zoom; }
 
@@ -162,22 +199,24 @@ public class GamePanel extends JPanel {
     // -----------------------------------------------------------------------
 
     private boolean deathHandled;
-    private int     fpsCounter;
-    private long    fpsTimer;
+    private int fpsCounter;
+    private long fpsTimer;
 
     // -----------------------------------------------------------------------
     //  Helper collaborators (package-private — GameRenderer accesses inputHandler)
     // -----------------------------------------------------------------------
 
     GameInputHandler inputHandler;
-    GameRenderer     renderer;
+    GameRenderer renderer;
 
     // -----------------------------------------------------------------------
     //  External listeners (set by Game)
     // -----------------------------------------------------------------------
 
     private java.util.function.Consumer<String> loginSuccessListener;
+    private java.util.function.Consumer<Boolean> authStateListener;
     private Runnable disconnectListener;
+    private boolean pendingRegistrationAuth;
 
     public void setLoginSuccessListener(java.util.function.Consumer<String> listener) {
         this.loginSuccessListener = listener;
@@ -187,8 +226,134 @@ public class GamePanel extends JPanel {
         this.disconnectListener = listener;
     }
 
+    public void setAuthStateListener(java.util.function.Consumer<Boolean> listener) {
+        this.authStateListener = listener;
+    }
+
+    public void setFullscreenListener(Runnable listener) {
+        rightPanel.setFullscreenListener(listener);
+    }
+
+    public void setResizableListener(Runnable listener) {
+        rightPanel.setResizableListener(listener);
+    }
+
+    public void setFpsListener(Runnable listener) {
+        rightPanel.setFpsListener(listener);
+    }
+
+    public void setPingListener(Runnable listener) {
+        rightPanel.setPingListener(listener);
+    }
+
+    public void setFullscreenState(boolean fullscreen) {
+        rightPanel.setFullscreen(fullscreen);
+    }
+
+    public void setResizableState(boolean resizable) {
+        rightPanel.setResizable(resizable);
+    }
+
+    public void setShowFpsState(boolean showFps) {
+        settings.setShowFps(showFps);
+        rightPanel.setShowFps(showFps);
+    }
+
+    public void setShowPingState(boolean showPing) {
+        settings.setShowPing(showPing);
+        rightPanel.setShowPing(showPing);
+    }
+
+    public void syncSettingsUi() {
+        rightPanel.setShowFps(settings.isShowFps());
+        rightPanel.setShowPing(settings.isShowPing());
+    }
+
+    public boolean isShowTotalXpEnabled() {
+        return settings.isShowTotalXp();
+    }
+
+    public void toggleShowFps() {
+        settings.setShowFps(!settings.isShowFps());
+        rightPanel.setShowFps(settings.isShowFps());
+        settings.save();
+    }
+
+    public void toggleShowPing() {
+        settings.setShowPing(!settings.isShowPing());
+        rightPanel.setShowPing(settings.isShowPing());
+        settings.save();
+    }
+
+    public void toggleShowTotalXp() {
+        settings.setShowTotalXp(!settings.isShowTotalXp());
+        settings.save();
+    }
+
+    public void setTotalXpListener(Runnable listener) {
+        rightPanel.setTotalXpListener(listener);
+    }
+
+    public void toggleShiftClickDrop() {
+        settings.setShiftClickDrop(!settings.isShiftClickDrop());
+        settings.save();
+    }
+
+    public void setShiftDropListener(Runnable listener) {
+        rightPanel.setShiftDropListener(listener);
+    }
+
+    public boolean isShowFpsEnabled() {
+        return settings.isShowFps();
+    }
+
+    public boolean isShowPingEnabled() {
+        return settings.isShowPing();
+    }
+
     void setHoverText(String text) {
         hoverText = text != null && !text.isBlank() ? text : "";
+    }
+
+    boolean isInGame() {
+        return clientState == ClientState.IN_GAME;
+    }
+
+    boolean isOnLoginScreen() {
+        return clientState == ClientState.LOGIN;
+    }
+
+    boolean shouldRenderLoginScreen() {
+        return clientState == ClientState.LOGIN || clientState == ClientState.LOGGING_IN;
+    }
+
+    boolean isPreGameState() {
+        return clientState != ClientState.IN_GAME;
+    }
+
+    boolean isLoadingState() {
+        return clientState == ClientState.LOADING;
+    }
+
+    void beginLoginTransition() {
+        clientState = ClientState.LOGGING_IN;
+        pendingEnterGame = false;
+        loadingOverlayTimer = 0.0;
+        fadingIn = false;
+        fadingOut = true;
+    }
+
+    private void enterLoadingState() {
+        clientState = ClientState.LOADING;
+        loadingOverlayTimer = MIN_LOADING_DISPLAY_SECONDS;
+    }
+
+    private void beginFadeInToGame() {
+        clientState = ClientState.IN_GAME;
+        pendingEnterGame = false;
+        loadingOverlayTimer = 0.0;
+        fadingOut = false;
+        fadingIn = true;
     }
 
     void openContextMenu(List<ContextMenuOption> options, int x, int y) {
@@ -204,6 +369,28 @@ public class GamePanel extends JPanel {
         contextMenuOptions.clear();
     }
 
+    void closeActiveInterfacePanel() {
+        rightPanel.closeActiveTab();
+    }
+
+    void toggleActiveInterfacePanel(TabType targetTab) {
+        if (rightPanel.getActiveTab() == targetTab) {
+            rightPanel.closeActiveTab();
+            return;
+        }
+        inputHandler.closeInterfaces();
+        rightPanel.openTab(targetTab);
+        suppressHoverBriefly();
+    }
+
+    void suppressHoverBriefly() {
+        ignoreHoverUntil = System.currentTimeMillis() + PANEL_HOVER_SUPPRESS_MS;
+        setHoverText(null);
+        if (inputHandler != null) {
+            inputHandler.clearUiHoverState();
+        }
+    }
+
     void updateTotalXpFromSkills() {
         long total = 0L;
         for (com.classic.preservitory.entity.Skill skill : player.getSkillSystem().getAllSkills().values()) {
@@ -215,11 +402,10 @@ public class GamePanel extends JPanel {
     void addXpDrop(String skillName, int xp) {
         totalXp += Math.max(0, xp);
         int lane = xpDrops.size() % 4;
-        int inventoryPanelX = Constants.PANEL_X;
-        double startX = inventoryPanelX - 60;
-        double startY = Math.max(60, getHeight() / 2.0) + lane * 18;
-        double targetX = inventoryPanelX - 60;
-        double targetY = XP_TRACKER_Y + 16;
+        double startX  = getXpTrackerX() + 60;
+        double startY  = XP_DROP_START_Y + lane * 18;   // starts higher, uses the constant
+        double targetX = getXpTrackerX() + 60;
+        double targetY = XP_TRACKER_Y + 11;
         xpDrops.add(new XpDrop(startX, startY, "+" + xp + " " + skillName, FloatingText.COLOR_SKILL, targetX, targetY));
     }
 
@@ -227,21 +413,31 @@ public class GamePanel extends JPanel {
     //  Construction
     // -----------------------------------------------------------------------
 
-    public GamePanel(MusicManager musicManager) {
+    public GamePanel(MusicManager musicManager, ClientSettings settings) {
         this.musicManager = musicManager;
+        this.settings = settings;
+        this.rightPanel = new RightPanel(settings);
 
         AssetManager.load();
+        PlayerSpriteManager.load();
+        if (Constants.EDITOR_MODE) {
+            editorState.setAvailableObjects(editorActions.loadAvailableObjects());
+        }
 
         loginScreen = new LoginScreen(
                 Constants.SCREEN_WIDTH, Constants.SCREEN_HEIGHT,
                 (u, p) -> {
                     if (!clientConnection.isConnected()) { loginScreen.setStatus("Server offline."); return; }
+                    pendingRegistrationAuth = false;
                     loginScreen.setStatus("Logging in...");
+                    beginLoginTransition();
                     clientConnection.sendLogin(u, p);
                 },
                 (u, p) -> {
                     if (!clientConnection.isConnected()) { loginScreen.setStatus("Server offline."); return; }
+                    pendingRegistrationAuth = true;
                     loginScreen.setStatus("Registering...");
+                    beginLoginTransition();
                     clientConnection.sendRegister(u, p);
                 },
                 musicManager
@@ -260,28 +456,33 @@ public class GamePanel extends JPanel {
                 }
         );
 
-        setPreferredSize(new Dimension(Constants.SCREEN_WIDTH, Constants.SCREEN_HEIGHT));
         setBackground(Color.BLACK);
         setFocusable(true);
 
-        world             = new World();
-        player            = new Player(12 * Constants.TILE_SIZE, 9 * Constants.TILE_SIZE);
-        mouseHandler      = new MouseHandler();
+        world = new World();
+        player = new Player(12 * Constants.TILE_SIZE, 9 * Constants.TILE_SIZE);
+        mouseHandler = new MouseHandler();
         movementSystem    = new MovementSystem();
         woodcuttingSystem = new WoodcuttingSystem();
         miningSystem      = new MiningSystem();
         combatSystem      = new CombatSystem();
+        attackSystem      = new AttackSystem();
         soundSystem       = new SoundSystem();
-        gameLoop          = new GameLoop(this);
+        gameLoop = new GameLoop(this);
 
         inputHandler = new GameInputHandler(this);
-        renderer     = new GameRenderer(this);
+        renderer = new GameRenderer(this);
+        setFullscreenState(false);
+        setResizableState(false);
 
         setupInputListeners();
         setupNetworkListeners();
 
         rightPanel.setCombatStyleListener(style -> clientConnection.sendCombatStyle(style));
         rightPanel.setUnequipListener(slot -> clientConnection.sendUnequip(slot));
+        rightPanel.setKeybindingsListener(() -> toggleActiveInterfacePanel(TabType.KEYBINDINGS));
+        rightPanel.setKeybindingRebindListener(inputHandler::startKeybindingRebind);
+        syncSettingsUi();
 
         clientWorld.setDamageListener(event ->
                 spawnDamage(event.x, event.y, event.amount, false));
@@ -308,17 +509,29 @@ public class GamePanel extends JPanel {
                 if (SwingUtilities.isMiddleMouseButton(e)) {
                     panDragging = false;
                 }
+                if (Constants.EDITOR_MODE && SwingUtilities.isLeftMouseButton(e)) {
+                    setPainting(false);
+                    return;
+                }
             }
         });
 
         addMouseWheelListener(e -> {
-            if (shopWindow.isOpen()) {
-                shopWindow.handleScroll(e.getWheelRotation() > 0 ? 1 : -1);
-            } else if (e.getX() >= Constants.PANEL_X) {
-                rightPanel.handleMouseWheel(e.getWheelRotation() > 0 ? 1 : -1);
-            } else {
+            if (Constants.EDITOR_MODE) {
                 targetZoom = Math.max(0.5, Math.min(2.0,
                         targetZoom - e.getPreciseWheelRotation() * 0.1));
+                repaint();
+                return;
+            }
+            if (shopWindow.isOpen()) {
+                shopWindow.handleScroll(e.getWheelRotation() > 0 ? 1 : -1);
+            } else if (e.getX() >= getPanelX()) {
+                rightPanel.handleMouseWheel(e.getWheelRotation() > 0 ? 1 : -1);
+            } else {
+                double nextTargetZoom = Math.max(0.5, Math.min(2.0,
+                        targetZoom - e.getPreciseWheelRotation() * 0.1));
+                recenterCameraOnZoomIn = nextTargetZoom > targetZoom;
+                targetZoom = nextTargetZoom;
                 repaint();
             }
         });
@@ -327,17 +540,22 @@ public class GamePanel extends JPanel {
             @Override public void mouseMoved(MouseEvent e) {
                 inputHandler.hoverX = e.getX();
                 inputHandler.hoverY = e.getY();
-                if (authRequired) { loginScreen.handleMouseMove(e.getX(), e.getY()); return; }
+                if (shouldRenderLoginScreen()) { loginScreen.handleMouseMove(e.getX(), e.getY()); return; }
+                if (isPreGameState()) { return; }
                 questCompleteWindow.handleMouseMove(e.getX(), e.getY());
                 shopWindow.handleMouseMove(e.getX(), e.getY());
-                rightPanel.handleMouseMove(e.getX(), e.getY());
+                rightPanel.handleMouseMove(e.getX(), e.getY(), getPanelX());
                 inputHandler.updateCursorForHover(e.getX(), e.getY());
             }
 
             @Override public void mouseDragged(MouseEvent e) {
                 inputHandler.hoverX = e.getX();
                 inputHandler.hoverY = e.getY();
-                rightPanel.handleMouseMove(e.getX(), e.getY());
+                rightPanel.handleMouseMove(e.getX(), e.getY(), getPanelX());
+                if (Constants.EDITOR_MODE && isPainting()) {
+                    inputHandler.paintTile();
+                    return;
+                }
                 if (panDragging) {
                     double z = getZoom();
                     cameraZoomOffsetX -= (e.getX() - panLastMouseX) / z;
@@ -350,7 +568,7 @@ public class GamePanel extends JPanel {
         });
 
         addKeyListener(new KeyAdapter() {
-            @Override public void keyPressed(KeyEvent e)  { inputHandler.handleKey(e.getKeyCode()); }
+            @Override public void keyPressed(KeyEvent e)  { inputHandler.handleKey(e); }
             @Override public void keyTyped(KeyEvent e)    { inputHandler.handleCharTyped(e.getKeyChar()); }
         });
     }
@@ -366,13 +584,19 @@ public class GamePanel extends JPanel {
             public void onConnected(String assignedId) {
                 player.setId(assignedId);
                 deathHandled       = false;
-                authRequired       = true;
+                clientState        = ClientState.LOGIN;
+                fadeAlpha          = 0f;
+                fadingIn           = false;
+                fadingOut          = false;
+                pendingEnterGame   = false;
+                loadingOverlayTimer = 0.0;
+                if (authStateListener != null) authStateListener.accept(false);
+                pendingRegistrationAuth = false;
                 currentAccountName = "";
                 totalXp            = 0L;
                 xpDrops.clear();
                 closeContextMenu();
                 loginScreen.reset();
-                chatBox.post("Connected. Please log in.", ChatBox.COLOR_SYSTEM);
             }
 
             @Override
@@ -385,19 +609,28 @@ public class GamePanel extends JPanel {
                 rightPanel.setQuestEntries(java.util.Collections.emptyList());
                 player.applyEquipmentUpdate(null);
 
-                authRequired       = true;
+                clientState        = ClientState.LOGIN;
+                fadeAlpha          = 0f;
+                fadingIn           = false;
+                fadingOut          = false;
+                pendingEnterGame   = false;
+                loadingOverlayTimer = 0.0;
+                if (authStateListener != null) authStateListener.accept(false);
+                pendingRegistrationAuth = false;
                 currentAccountName = "";
                 totalXp            = 0L;
                 xpDrops.clear();
                 closeContextMenu();
                 loginScreen.setStatus("Server offline. Reconnecting...");
-                chatBox.post("Disconnected from server. Reconnecting...", ChatBox.COLOR_SYSTEM);
-                showMessage("Server offline.");
                 if (disconnectListener != null) disconnectListener.run();
             }
 
             @Override
             public void onLoggedOut() {
+                boolean shouldShowLogout = !currentAccountName.isEmpty()
+                        && (clientState == ClientState.IN_GAME
+                        || clientState == ClientState.LOADING
+                        || pendingEnterGame);
                 inputHandler.stopAllActivities();
                 gameState = GameState.PLAYING;
                 chatBox.clearDialogue();
@@ -406,7 +639,14 @@ public class GamePanel extends JPanel {
                 rightPanel.setQuestEntries(java.util.Collections.emptyList());
                 player.applyEquipmentUpdate(null);
 
-                authRequired                 = true;
+                clientState                  = ClientState.LOGIN;
+                fadeAlpha                    = 0f;
+                fadingIn                     = false;
+                fadingOut                    = false;
+                pendingEnterGame             = false;
+                loadingOverlayTimer          = 0.0;
+                if (authStateListener != null) authStateListener.accept(false);
+                pendingRegistrationAuth      = false;
                 currentAccountName           = "";
                 totalXp                      = 0L;
                 xpDrops.clear();
@@ -416,7 +656,9 @@ public class GamePanel extends JPanel {
                 inputHandler.chatInput.setLength(0);
 
                 loginScreen.reset();
-                chatBox.post("Logged out.", ChatBox.COLOR_SYSTEM);
+                if (shouldShowLogout) {
+                    chatBox.post("Logged out.", ChatBox.COLOR_SYSTEM);
+                }
                 musicManager.play();
             }
 
@@ -463,6 +705,12 @@ public class GamePanel extends JPanel {
         clientConnection.setLootRemoveListener(clientWorld::removeLoot);
         clientConnection.setInventorySlotListener(slots -> player.applyInventorySlots(slots));
         clientConnection.setStopActionListener(() -> inputHandler.stopAllActivities());
+        clientConnection.setStartGatheringListener(parts ->
+                inputHandler.startServerApprovedGathering(parts[0], parts[1]));
+        clientConnection.setGatherFailListener(message -> {
+            inputHandler.stopAllActivities();
+            showMessage(message);
+        });
         clientConnection.setEquipmentListener(eq  -> player.applyEquipmentUpdate(eq));
         clientConnection.setSkillSnapshotListener(snapshot -> {
             player.applySkillSnapshot(snapshot);
@@ -484,6 +732,7 @@ public class GamePanel extends JPanel {
                 chatBox.post("You have started: " + name, ChatBox.COLOR_QUEST));
 
         clientConnection.setQuestCompleteListener(name -> {
+            inputHandler.closeInterfaces();
             chatBox.post("Quest completed: " + name, ChatBox.COLOR_LEVEL);
             chatBox.post("", ChatBox.COLOR_DEFAULT);
             pendingRewardHeader[0] = true;
@@ -541,27 +790,44 @@ public class GamePanel extends JPanel {
         });
 
         clientConnection.setShopListener(shop -> {
+            inputHandler.closeDialogue();
+            questCompleteWindow.softClose();
+            rightPanel.openTab(TabType.INVENTORY);
             shopWindow.open(shop);
             showMessage("Shop opened.");
         });
 
         clientConnection.setAuthSuccessListener(username -> {
-            authRequired       = false;
+            boolean firstLogin = pendingRegistrationAuth;
+            if (authStateListener != null) authStateListener.accept(true);
+            pendingRegistrationAuth = false;
             currentAccountName = username;
             inputHandler.isTypingChat = false;
             inputHandler.chatInput.setLength(0);
             loginScreen.reset();
             musicManager.stop();
-            chatBox.post("Logged in as " + username + ".", ChatBox.COLOR_SYSTEM);
-            showMessage("Authenticated as " + username + ".");
+            chatBox.post(firstLogin
+                    ? "Welcome, " + username + "!"
+                    : "Welcome back, " + username + "!", ChatBox.COLOR_SYSTEM);
             if (loginSuccessListener != null) loginSuccessListener.accept(username);
+            pendingEnterGame = true;
+            if (!fadingOut && fadeAlpha >= 1f) {
+                enterLoadingState();
+            } else {
+                clientState = ClientState.LOADING;
+            }
         });
 
         clientConnection.setAuthFailureListener(message -> {
-            authRequired = true;
+            clientState = ClientState.LOGIN;
+            fadeAlpha = 0f;
+            fadingIn = false;
+            fadingOut = false;
+            pendingEnterGame = false;
+            loadingOverlayTimer = 0.0;
+            if (authStateListener != null) authStateListener.accept(false);
+            pendingRegistrationAuth = false;
             loginScreen.setStatus(message);
-            chatBox.post(message, ChatBox.COLOR_SYSTEM);
-            showMessage(message);
         });
     }
 
@@ -576,15 +842,48 @@ public class GamePanel extends JPanel {
 
     /** Called once per frame by {@link GameLoop}. */
     public void update(double deltaTime) {
-        if (!clientConnection.isConnected() || authRequired) {
-            inputHandler.stopAllActivities();
-            player.getAnimation().setState(Animation.State.IDLE);
-        } else if (gameState == GameState.PLAYING) {
-            movementSystem.update(player, mouseHandler, deltaTime);
-            inputHandler.updateInteractions(deltaTime);
+        if (fadingOut) {
+            fadeAlpha = Math.min(1f, fadeAlpha + (float) (deltaTime * FADE_SPEED));
+            if (fadeAlpha >= 1f) {
+                fadeAlpha = 1f;
+                fadingOut = false;
+                enterLoadingState();
+            }
+        } else if (fadingIn) {
+            fadeAlpha = Math.max(0f, fadeAlpha - (float) (deltaTime * FADE_SPEED));
+            if (fadeAlpha <= 0f) {
+                fadeAlpha = 0f;
+                fadingIn = false;
+            }
+        }
 
-            if (player.isDead()) handlePlayerDeath();
-            updateAnimation(deltaTime);
+        if (clientState == ClientState.LOADING) {
+            loadingOverlayTimer = Math.max(0.0, loadingOverlayTimer - deltaTime);
+            if (pendingEnterGame && !fadingOut && loadingOverlayTimer <= 0.0) {
+                beginFadeInToGame();
+            }
+        }
+
+        if (Constants.EDITOR_MODE) {
+            soundSystem.setEnabled(false);
+            if (musicManager != null) musicManager.stop();
+            inputHandler.stopAllActivities();
+        } else {
+            soundSystem.setEnabled(true);
+            if (!clientConnection.isConnected() || !isInGame()) {
+                inputHandler.stopAllActivities();
+                player.getAnimation().setState(Animation.State.IDLE);
+            } else if (gameState == GameState.PLAYING) {
+                attackSystem.update(deltaTime);
+                // Movement is locked while an attack animation is playing.
+                if (!attackSystem.isAttacking()) {
+                    movementSystem.update(player, mouseHandler, deltaTime);
+                }
+                inputHandler.updateInteractions(deltaTime);
+
+                if (player.isDead()) handlePlayerDeath();
+                updateAnimation(deltaTime);
+            }
         }
 
         // Floating texts animate in all states
@@ -604,7 +903,8 @@ public class GamePanel extends JPanel {
         if (messageTimer > 0) messageTimer = Math.max(0, messageTimer - deltaTime);
         inputHandler.tickLogoutTimer(deltaTime);
 
-        if (!authRequired) clientConnection.sendPosition((int) player.getX(), (int) player.getY());
+        clientConnection.sendPingIfDue();
+        if (isInGame()) clientConnection.sendPosition((int) player.getX(), (int) player.getY());
         syncRemotePlayers(deltaTime);
 
         // Smooth zoom interpolation with mouse-centred camera adjustment
@@ -618,11 +918,22 @@ public class GamePanel extends JPanel {
             // The adjustment needed per frame is (screenX - vpCx) * (1/oldZoom - 1/newZoom).
             int mx = inputHandler.hoverX;
             int my = inputHandler.hoverY;
-            if (mx >= 0 && mx < Constants.VIEWPORT_W && my >= 0 && my < Constants.VIEWPORT_H) {
-                double vpCx = Constants.VIEWPORT_W / 2.0;
-                double vpCy = Constants.VIEWPORT_H / 2.0;
+            if (mx >= 0 && mx < getViewportW() && my >= 0 && my < getHeight()) {
+                double vpCx = getViewportW() / 2.0;
+                double vpCy = getHeight() / 2.0;
                 cameraZoomOffsetX += (mx - vpCx) * (1.0 / oldZoom - 1.0 / zoom);
                 cameraZoomOffsetY += (my - vpCy) * (1.0 / oldZoom - 1.0 / zoom);
+            }
+        }
+
+        if (recenterCameraOnZoomIn) {
+            double factor = Math.min(1.0, deltaTime * 10.0);
+            cameraZoomOffsetX += (0.0 - cameraZoomOffsetX) * factor;
+            cameraZoomOffsetY += (0.0 - cameraZoomOffsetY) * factor;
+            if (Math.abs(cameraZoomOffsetX) < 0.5 && Math.abs(cameraZoomOffsetY) < 0.5) {
+                cameraZoomOffsetX = 0.0;
+                cameraZoomOffsetY = 0.0;
+                recenterCameraOnZoomIn = false;
             }
         }
 
@@ -682,6 +993,14 @@ public class GamePanel extends JPanel {
     // -----------------------------------------------------------------------
 
     private void updateAnimation(double deltaTime) {
+        // ATTACKING overrides everything else — animation data comes from AttackSystem.
+        if (attackSystem.isAttacking()) {
+            player.getAnimation().setAttackData(
+                    attackSystem.getAnimName(), attackSystem.getCurrentFrame());
+            // AttackSystem manages its own timer; no tick() call needed here.
+            return;
+        }
+
         Animation.State anim;
         if      (combatSystem.isInCombat())       anim = Animation.State.FIGHTING;
         else if (woodcuttingSystem.isChopping())  anim = Animation.State.CHOPPING;
@@ -690,7 +1009,10 @@ public class GamePanel extends JPanel {
         else                                      anim = Animation.State.IDLE;
 
         player.getAnimation().setState(anim);
-        player.getAnimation().tick(deltaTime);
+        // Only advance the timer when an action/movement is active.
+        if (anim != Animation.State.IDLE) {
+            player.getAnimation().tick(deltaTime);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -700,6 +1022,7 @@ public class GamePanel extends JPanel {
     private void handlePlayerDeath() {
         if (deathHandled) return;
         deathHandled = true;
+        attackSystem.stopAttack();
         inputHandler.stopAllActivities();
         showMessage("You have died. Waiting for server respawn/state update.");
     }
@@ -793,7 +1116,50 @@ public class GamePanel extends JPanel {
 
         @Override
         public boolean isDone() {
-            return alpha <= 0f || y < 40 || timer <= 0;
+            // Stop just below the XP tracker box (tracker top + height + small gap).
+            int stopY = XP_TRACKER_Y + 22 + 6;
+            return alpha <= 0f || y < stopY || timer <= 0;
         }
     }
+
+    public TileMap getTileMap() {
+        return tileMap;
+    }
+
+    public void setHoveredTile(int x, int y) {
+        this.hoveredTileX = x;
+        this.hoveredTileY = y;
+    }
+
+    public int getHoveredTileX() { return hoveredTileX; }
+    public int getHoveredTileY() { return hoveredTileY; }
+
+    public int getSelectedTileId() { return editorState.getSelectedTileId(); }
+    public void setSelectedTileId(int id) { editorState.setSelectedTileId(id); }
+
+    public boolean isPainting() { return editorState.isPainting(); }
+    public void setPainting(boolean painting) { editorState.setPainting(painting); }
+
+    // -----------------------------------------------------------------------
+    //  Editor — map operations (delegate to EditorActions)
+    // -----------------------------------------------------------------------
+
+    public void newMap(int width, int height) {
+        editorActions.newMap(tileMap, editorState);
+        repaint();
+    }
+
+    public void saveMap(String filePath) {
+        showMessage(editorActions.saveMap(tileMap, editorState.getObjects(), filePath));
+    }
+
+    public void loadMap(String filePath) {
+        if (editorActions.loadMap(tileMap, editorState, filePath)) {
+            repaint();
+            showMessage("Map loaded from " + filePath);
+        } else {
+            showMessage("Load failed: " + filePath);
+        }
+    }
+
 }

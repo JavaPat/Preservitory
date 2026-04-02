@@ -202,7 +202,7 @@ public class QuestCompleteWindow {
 
     private void drawTitle(Graphics2D g) {
         // Title text — gold, bold
-        g.setFont(new Font("Monospaced", Font.BOLD, 13));
+        g.setFont(new Font("Arial", Font.BOLD, 13));
         FontMetrics fm  = g.getFontMetrics();
         String title    = "Quest Complete!";
         int tx = winX + (WIN_W - fm.stringWidth(title)) / 2;
@@ -220,7 +220,7 @@ public class QuestCompleteWindow {
         g.drawLine(winX + PAD_X, divY + 1, winX + WIN_W - PAD_X, divY + 1);
 
         // Quest name — orange, centred, below divider
-        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        g.setFont(new Font("Arial", Font.PLAIN, 11));
         fm = g.getFontMetrics();
         int nx = winX + (WIN_W - fm.stringWidth(questName)) / 2;
         int ny = winY + TITLE_H + fm.getAscent() + 2;
@@ -237,13 +237,13 @@ public class QuestCompleteWindow {
 
         // ---- Rewards ----
         if (!rewards.isEmpty()) {
-            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+            g.setFont(new Font("Arial", Font.BOLD, 10));
             FontMetrics fmBold = g.getFontMetrics();
             g.setColor(new Color(185, 163, 80));
             g.drawString("Rewards:", winX + PAD_X, cursor + fmBold.getAscent());
             cursor += ROW_H;
 
-            g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+            g.setFont(new Font("Arial", Font.PLAIN, 10));
             FontMetrics fm = g.getFontMetrics();
             for (int[] reward : rewards) {
                 String name = ItemDefinitionManager.exists(reward[0])
@@ -261,7 +261,7 @@ public class QuestCompleteWindow {
 
         // ---- XP ----
         if (!xpRewards.isEmpty()) {
-            g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+            g.setFont(new Font("Arial", Font.PLAIN, 10));
             FontMetrics fm = g.getFontMetrics();
             for (String[] xp : xpRewards) {
                 String skill = xp[0].isEmpty() ? "XP"
@@ -285,7 +285,7 @@ public class QuestCompleteWindow {
         g.setColor(btnHovered ? new Color(220, 185, 65) : new Color(120, 96, 32));
         g.drawRoundRect(btnX, btnY, BTN_W, BTN_H, 5, 5);
 
-        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setFont(new Font("Arial", Font.BOLD, 10));
         FontMetrics fm = g.getFontMetrics();
         String label = "Continue";
         int lx = btnX + (BTN_W - fm.stringWidth(label)) / 2;
@@ -299,7 +299,7 @@ public class QuestCompleteWindow {
         g.fillRoundRect(closeX, closeY, CLOSE_SZ, CLOSE_SZ, 4, 4);
         g.setColor(new Color(190, 160, 110));
         g.drawRoundRect(closeX, closeY, CLOSE_SZ, CLOSE_SZ, 4, 4);
-        g.setFont(new Font("Monospaced", Font.BOLD, 9));
+        g.setFont(new Font("Arial", Font.BOLD, 9));
         FontMetrics fm = g.getFontMetrics();
         g.setColor(Color.WHITE);
         g.drawString("X", closeX + (CLOSE_SZ - fm.stringWidth("X")) / 2, closeY + CLOSE_SZ - 4);

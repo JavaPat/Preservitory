@@ -5,6 +5,7 @@ import com.classic.preservitory.client.definitions.ItemDefinitionManager;
 import com.classic.preservitory.item.Inventory;
 import com.classic.preservitory.item.Item;
 import com.classic.preservitory.system.SkillSystem;
+import com.classic.preservitory.ui.framework.assets.PlayerSpriteManager;
 import com.classic.preservitory.util.Constants;
 import com.classic.preservitory.util.IsoUtils;
 
@@ -115,6 +116,13 @@ public class Player extends Entity {
             facingX = fx;
             facingY = fy;
         }
+    }
+
+    /** Immediately face towards the given entity. */
+    public void faceTarget(com.classic.preservitory.entity.Entity target) {
+        int nx = (int) Math.signum(target.getCenterX() - getCenterX());
+        int ny = (int) Math.signum(target.getCenterY() - getCenterY());
+        setFacing(nx, ny);
     }
 
     // -----------------------------------------------------------------------
@@ -240,53 +248,24 @@ public class Player extends Entity {
             bobY = (int)(animation.sin(8) * 2.0);  // ±2 px at 8 Hz
         }
 
-        // ---- Body dimensions ----
-        int bodyW = 14;
-        int bodyH = 26;
-        int bodyX = footX - bodyW / 2;
-        int bodyY = footY - bodyH + bobY;
-
         // ---- Shadow (dark ellipse on the ground) ----
         g2.setColor(new Color(0, 0, 0, 85));
         g2.fillOval(footX - 11, footY - 5, 22, 10);
 
-        // ---- Body colour — changes per state ----
-        Color bodyColor;
-        Color highlightColor;
+        boolean moving = state == Animation.State.WALKING;
+        int spriteFootY = footY + bobY;
 
-        switch (state) {
-            case FIGHTING:
-                // Pulse between green and orange-red to signal combat
-                double fightPulse = animation.pulse(6);
-                int r  = (int)(60  + 140 * fightPulse);
-                int gv = (int)(180 - 130 * fightPulse);
-                bodyColor      = new Color(r, gv, 60);
-                highlightColor = bodyColor.brighter();
-                break;
-
-            case CHOPPING:
-            case MINING:
-                bodyColor      = new Color(75, 170, 75);
-                highlightColor = new Color(120, 225, 120);
-                break;
-
-            default: // IDLE + WALKING
-                bodyColor      = new Color(60, 180, 60);
-                highlightColor = new Color(100, 220, 100);
-                break;
+        if (PlayerSpriteManager.isLoaded()) {
+            if (state == Animation.State.ATTACKING) {
+                PlayerSpriteManager.drawPlayerAction(g2, footX, spriteFootY,
+                        animation.getAttackAnimName(), getSpriteDirection(), animation.getAttackFrame());
+            } else {
+                PlayerSpriteManager.drawPlayer(g2, footX, spriteFootY,
+                        getSpriteDirection(), moving, animation.getTimer());
+            }
+        } else {
+            renderLegacyBody(g2, footX, spriteFootY, state);
         }
-
-        // ---- Draw body ----
-        g2.setColor(bodyColor);
-        g2.fillRect(bodyX, bodyY, bodyW, bodyH);
-
-        // Highlight quad (top-left corner of body)
-        g2.setColor(highlightColor);
-        g2.fillRect(bodyX + 2, bodyY + 2, bodyW / 3, bodyH / 4);
-
-        // Outline
-        g2.setColor(Color.DARK_GRAY);
-        g2.drawRect(bodyX, bodyY, bodyW, bodyH);
 
         // ---- Tool flash (right side of body) ----
         if (state == Animation.State.CHOPPING) {
@@ -294,28 +273,86 @@ public class Player extends Entity {
             if (phase > 0) {
                 int alpha = (int)(phase * 220);
                 g2.setColor(new Color(220, 170, 50, alpha));
-                g2.fillRect(bodyX + bodyW + 1, bodyY + 6, 5, 12);
+                g2.fillRect(footX + 9, spriteFootY - 20, 5, 12);
             }
         } else if (state == Animation.State.MINING) {
             double phase = animation.sin(4);
             if (phase > 0) {
                 int alpha = (int)(phase * 220);
                 g2.setColor(new Color(120, 160, 230, alpha));
-                g2.fillRect(bodyX + bodyW + 1, bodyY + 6, 5, 12);
+                g2.fillRect(footX + 9, spriteFootY - 20, 5, 12);
             }
         }
+    }
 
-        // ---- Facing-direction dot ----
-        // Small white oval drawn at the edge of the body that faces the
-        // current movement direction.
-        int dotX, dotY;
-        if      (facingX > 0) { dotX = bodyX + bodyW - 5; dotY = bodyY + bodyH / 2 - 3; }
-        else if (facingX < 0) { dotX = bodyX + 1;          dotY = bodyY + bodyH / 2 - 3; }
-        else if (facingY < 0) { dotX = bodyX + bodyW / 2 - 3; dotY = bodyY + 1; }
-        else                   { dotX = bodyX + bodyW / 2 - 3; dotY = bodyY + bodyH - 7; }
+    private void renderLegacyBody(Graphics2D g2, int footX, int footY, Animation.State state) {
+        int bodyW = 14;
+        int bodyH = 26;
+        int bodyX = footX - bodyW / 2;
+        int bodyY = footY - bodyH;
+
+        Color bodyColor;
+        Color highlightColor;
+
+        switch (state) {
+            case FIGHTING:
+                double fightPulse = animation.pulse(6);
+                int r = (int) (60 + 140 * fightPulse);
+                int gv = (int) (180 - 130 * fightPulse);
+                bodyColor = new Color(r, gv, 60);
+                highlightColor = bodyColor.brighter();
+                break;
+
+            case CHOPPING:
+            case MINING:
+                bodyColor = new Color(75, 170, 75);
+                highlightColor = new Color(120, 225, 120);
+                break;
+
+            default:
+                bodyColor = new Color(60, 180, 60);
+                highlightColor = new Color(100, 220, 100);
+                break;
+        }
+
+        g2.setColor(bodyColor);
+        g2.fillRect(bodyX, bodyY, bodyW, bodyH);
+
+        g2.setColor(highlightColor);
+        g2.fillRect(bodyX + 2, bodyY + 2, bodyW / 3, bodyH / 4);
+
+        g2.setColor(Color.DARK_GRAY);
+        g2.drawRect(bodyX, bodyY, bodyW, bodyH);
+
+        int dotX;
+        int dotY;
+        if (facingX > 0) {
+            dotX = bodyX + bodyW - 5;
+            dotY = bodyY + bodyH / 2 - 3;
+        } else if (facingX < 0) {
+            dotX = bodyX + 1;
+            dotY = bodyY + bodyH / 2 - 3;
+        } else if (facingY < 0) {
+            dotX = bodyX + bodyW / 2 - 3;
+            dotY = bodyY + 1;
+        } else {
+            dotX = bodyX + bodyW / 2 - 3;
+            dotY = bodyY + bodyH - 7;
+        }
 
         g2.setColor(new Color(255, 255, 255, 200));
         g2.fillOval(dotX, dotY, 6, 6);
+    }
+
+    private String getSpriteDirection() {
+        if (facingX > 0 && facingY < 0) return "north-east";
+        if (facingX > 0 && facingY > 0) return "south-east";
+        if (facingX < 0 && facingY < 0) return "north-west";
+        if (facingX < 0 && facingY > 0) return "south-west";
+        if (facingX > 0) return "east";
+        if (facingX < 0) return "west";
+        if (facingY < 0) return "north";
+        return "south";
     }
 
     // -----------------------------------------------------------------------

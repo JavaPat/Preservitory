@@ -12,6 +12,8 @@ public class Constants {
 
     public static final String LOCALHOST = "localhost";
 
+    public static final boolean EDITOR_MODE = false;
+
     public static final String GAME_VERSION = "1.0";
 
     public static final String GAME_NAME_TO_LOWER = GAME_NAME.toLowerCase();
@@ -52,10 +54,10 @@ public class Constants {
     // -----------------------------------------------------------------------
 
     /** World width in tiles. */
-    public static final int WORLD_COLS = 30;
+    public static final int WORLD_COLS = 64;
 
     /** World height in tiles. */
-    public static final int WORLD_ROWS = 24;
+    public static final int WORLD_ROWS = 64;
 
     // -----------------------------------------------------------------------
     //  Tile / player / timing

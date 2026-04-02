@@ -40,9 +40,10 @@ public class Enemy extends Entity {
     // -----------------------------------------------------------------------
 
     public boolean containsPoint(int cx, int cy) {
+        int pad = 16;
         return state == State.ALIVE
-                && cx >= x && cx <= x + width
-                && cy >= y && cy <= y + height;
+                && cx >= x - pad && cx <= x + width  + pad
+                && cy >= y - pad && cy <= y + height + pad;
     }
 
     // -----------------------------------------------------------------------
@@ -113,7 +114,7 @@ public class Enemy extends Entity {
         g.drawRect(barX, barY, barW, barH);
 
         // Name tag
-        g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+        g.setFont(new Font("Arial", Font.PLAIN, 9));
         g.setColor(new Color(255, 170, 170));
         g.drawString(def.name, barX, barY - 2);
     }

@@ -27,6 +27,8 @@ class EquipmentTab implements Tab {
 
     private int              weaponRowY      = 0;
     private int              helmetRowY      = 0;
+    private boolean          weaponEquipped  = false;
+    private boolean          helmetEquipped  = false;
     private Consumer<String> unequipListener = null;
 
     // -----------------------------------------------------------------------
@@ -63,15 +65,27 @@ class EquipmentTab implements Tab {
         int bw = pw - 16;
         int y  = CONTENT_Y + 10;
 
-        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setFont(new Font("Arial", Font.BOLD, 10));
         drawOutlined(g, "EQUIPMENT", px + pw / 2 - 24, y + 2,
                 new Color(200, 185, 100), new Color(0, 0, 0, 160));
         y += 14;
 
         weaponRowY = y;
+        weaponEquipped = player.getEquippedItemId("WEAPON") != -1;
         y = drawEquipRow(g, x, y, bw, "Weapon", player.getEquippedItemId("WEAPON"));
         helmetRowY = y;
+        helmetEquipped = player.getEquippedItemId("HELMET") != -1;
         y = drawEquipRow(g, x, y, bw, "Helmet", player.getEquippedItemId("HELMET"));
+    }
+
+    String getHoveredButtonLabel(int sx, int sy) {
+        if (weaponEquipped && weaponRowY > 0 && sy >= weaponRowY && sy < weaponRowY + 16) {
+            return "Unequip weapon";
+        }
+        if (helmetEquipped && helmetRowY > 0 && sy >= helmetRowY && sy < helmetRowY + 16) {
+            return "Unequip helmet";
+        }
+        return null;
     }
 
     // -----------------------------------------------------------------------
@@ -82,7 +96,7 @@ class EquipmentTab implements Tab {
         boolean equipped = itemId != -1;
         String  itemName = equipped ? ItemDefinitionManager.get(itemId).name : "Empty";
 
-        g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+        g.setFont(new Font("Arial", Font.PLAIN, 10));
         g.setColor(new Color(160, 150, 100));
         g.drawString(slotLabel + ":", x, y + 11);
 

@@ -184,7 +184,7 @@ public class ChatBox {
             int padX = 7;
 
             // NPC name (cyan, bold)
-            g.setFont(new Font("Monospaced", Font.BOLD, 11));
+            g.setFont(new Font("Arial", Font.BOLD, 11));
             FontMetrics fmBold = g.getFontMetrics();
             int nameY = y + fmBold.getAscent() + 5;
             g.setColor(new Color(0, 0, 0, 200));
@@ -193,7 +193,7 @@ public class ChatBox {
             g.drawString(dialogueNpcName + ":", x + padX, nameY);
 
             // Dialogue text (white)
-            g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+            g.setFont(new Font("Arial", Font.PLAIN, 11));
             FontMetrics fm = g.getFontMetrics();
             int textY = nameY + fm.getHeight() + 2;
             g.setColor(new Color(0, 0, 0, 200));
@@ -203,7 +203,7 @@ public class ChatBox {
 
             if (!dialogueOptions.isEmpty()) {
                 // ---- Option rows ----
-                g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+                g.setFont(new Font("Arial", Font.PLAIN, 10));
                 FontMetrics fmOpt = g.getFontMetrics();
                 int optCursor = textY + fmOpt.getHeight() + 2;
                 optionsStartY = optCursor - y; // store relative to chatbox top
@@ -223,7 +223,7 @@ public class ChatBox {
 
                 // Hint (bottom-right)
                 String prompt = "[Press 1-" + Math.min(dialogueOptions.size(), 4) + " or click]";
-                g.setFont(new Font("Monospaced", Font.ITALIC, 10));
+                g.setFont(new Font("Arial", Font.ITALIC, 10));
                 FontMetrics fmHint = g.getFontMetrics();
                 int hintX = x + w - fmHint.stringWidth(prompt) - padX;
                 int hintY = y + msgAreaH - 5;
@@ -234,7 +234,7 @@ public class ChatBox {
             } else {
                 // "[Click to continue]" hint (gray, bottom-right)
                 String prompt = "[Click to continue]";
-                g.setFont(new Font("Monospaced", Font.ITALIC, 10));
+                g.setFont(new Font("Arial", Font.ITALIC, 10));
                 FontMetrics fmHint = g.getFontMetrics();
                 int hintX = x + w - fmHint.stringWidth(prompt) - padX;
                 int hintY = y + msgAreaH - 5;
@@ -246,7 +246,7 @@ public class ChatBox {
 
         // ---- Normal mode: scrolling message log ----
         } else if (!entries.isEmpty()) {
-            g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+            g.setFont(new Font("Arial", Font.PLAIN, 11));
             FontMetrics fm  = g.getFontMetrics();
             int lineH       = fm.getHeight() + 1;
             int padX        = 7;
@@ -283,7 +283,7 @@ public class ChatBox {
             boolean showCursor = (System.currentTimeMillis() % 800) < 500;
             String display = "> " + typingInput + (showCursor ? "|" : " ");
 
-            g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+            g.setFont(new Font("Arial", Font.PLAIN, 11));
             int padX   = 7;
             int textY  = barY + INPUT_BAR_H - 4;
 

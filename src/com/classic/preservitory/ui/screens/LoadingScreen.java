@@ -120,7 +120,7 @@ public class LoadingScreen extends JPanel {
         g.setColor(BAR_BORDER);
         g.drawRect(barX, barY, BAR_W, BAR_H);
 
-        g.setFont(new Font("Monospaced", Font.BOLD, 11));
+        g.setFont(new Font("Arial", Font.BOLD, 11));
         FontMetrics fm = g.getFontMetrics();
         String pct = percent + "%";
         g.setColor(TEXT_COLOR);
@@ -129,7 +129,7 @@ public class LoadingScreen extends JPanel {
 
     private void drawStatus(Graphics2D g, int w, int h) {
         if (status == null || status.isEmpty()) return;
-        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        g.setFont(new Font("Arial", Font.PLAIN, 11));
         FontMetrics fm = g.getFontMetrics();
         g.setColor(TEXT_COLOR);
         g.drawString(status, (w - fm.stringWidth(status)) / 2, h / 2 + 20 + BAR_H + 18);

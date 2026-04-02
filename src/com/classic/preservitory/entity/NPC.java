@@ -29,8 +29,9 @@ public class NPC extends Entity {
 
     /** True when the world-space point (px, py) is inside this NPC's bounding box. */
     public boolean containsPoint(int px, int py) {
-        return px >= x && px <= x + width
-            && py >= y && py <= y + height;
+        int pad = 16;
+        return px >= x - pad && px <= x + width  + pad
+            && py >= y - pad && py <= y + height + pad;
     }
 
     // -----------------------------------------------------------------------
@@ -69,12 +70,12 @@ public class NPC extends Entity {
         g.drawRect(bodyX, bodyY, bodyW, bodyH);
 
         // "?" marker (yellow, above body)
-        g.setFont(new Font("Monospaced", Font.BOLD, 13));
+        g.setFont(new Font("Arial", Font.BOLD, 13));
         g.setColor(new Color(255, 220, 40));
         g.drawString("?", footX - 4, bodyY - 14);
 
         // Name tag background + text
-        g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+        g.setFont(new Font("Arial", Font.PLAIN, 10));
         FontMetrics fm = g.getFontMetrics();
         int tw = fm.stringWidth(name);
         g.setColor(new Color(0, 0, 0, 160));

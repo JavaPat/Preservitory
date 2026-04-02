@@ -281,9 +281,17 @@ public class ClientWorld {
         return null;
     }
 
+    public Tree getTree(String id) {
+        return trees.get().get(id);
+    }
+
     public Rock getRockAt(int px, int py) {
         for (Rock r : getRocks()) if (r.containsPoint(px, py)) return r;
         return null;
+    }
+
+    public Rock getRock(String id) {
+        return rocks.get().get(id);
     }
 
     public Enemy getEnemyAt(int px, int py) {

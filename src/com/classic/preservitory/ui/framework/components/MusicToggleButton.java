@@ -37,7 +37,7 @@ public class MusicToggleButton extends UIComponent {
             g.setColor(music.isEnabled() ? new Color(60, 120, 60) : new Color(120, 60, 60));
             g.fillRect(x, y, width, height);
             g.setColor(Color.WHITE);
-            g.setFont(new Font("Monospaced", Font.BOLD, 11));
+            g.setFont(new Font("Arial", Font.BOLD, 11));
             g.drawString("M", x + width / 2 - 4, y + height / 2 + 4);
         }
 

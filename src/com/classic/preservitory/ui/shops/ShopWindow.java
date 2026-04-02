@@ -173,7 +173,7 @@ public class ShopWindow {
 
     private void drawHeader(Graphics2D g) {
         String title = shop.name;
-        g.setFont(new Font("Monospaced", Font.BOLD, 13));
+        g.setFont(new Font("Arial", Font.BOLD, 13));
         FontMetrics fm = g.getFontMetrics();
         int tx = winX + (WIN_W - fm.stringWidth(title)) / 2;
         g.setColor(new Color(0, 0, 0, 160));
@@ -181,7 +181,7 @@ public class ShopWindow {
         g.setColor(new Color(220, 200, 120));
         g.drawString(title, tx, winY + 22);
 
-        g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+        g.setFont(new Font("Arial", Font.PLAIN, 9));
         fm = g.getFontMetrics();
         String hint = "Click item to buy  |  Click inventory item to sell";
         g.setColor(new Color(105, 165, 105));
@@ -198,7 +198,7 @@ public class ShopWindow {
             g.fillRoundRect(closeX, closeY, CLOSE_SZ, CLOSE_SZ, 4, 4);
             g.setColor(new Color(190, 160, 110));
             g.drawRoundRect(closeX, closeY, CLOSE_SZ, CLOSE_SZ, 4, 4);
-            g.setFont(new Font("Monospaced", Font.BOLD, 10));
+            g.setFont(new Font("Arial", Font.BOLD, 10));
             g.setColor(Color.WHITE);
             g.drawString("X", closeX + 6, closeY + 14);
         }
@@ -207,7 +207,7 @@ public class ShopWindow {
     private void drawGrid(Graphics2D g) {
         List<ShopItem> items = shop.getStockItems();
         if (items.isEmpty()) {
-            g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+            g.setFont(new Font("Arial", Font.PLAIN, 11));
             g.setColor(new Color(135, 125, 80));
             String msg = "Nothing for sale.";
             FontMetrics fm = g.getFontMetrics();
@@ -257,7 +257,7 @@ public class ShopWindow {
         g.fillRoundRect(x + 8, y + 6, SLOT_W - 16, SLOT_H - 28, 4, 4);
 
         // Buy price
-        g.setFont(new Font("Monospaced", Font.PLAIN, 8));
+        g.setFont(new Font("Arial", Font.PLAIN, 8));
         FontMetrics fm = g.getFontMetrics();
         String priceStr = item.price + "c";
         g.setColor(new Color(150, 215, 150));
@@ -286,7 +286,7 @@ public class ShopWindow {
         drawScrollBtn(g, prevBtnX, scrollBtnY, btnW, btnH, "\u25C4", canPrev);
 
         // Page indicator
-        g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+        g.setFont(new Font("Arial", Font.PLAIN, 9));
         FontMetrics fm = g.getFontMetrics();
         String pageLabel = currentPage + " / " + totalPages;
         g.setColor(new Color(160, 148, 100));
@@ -303,7 +303,7 @@ public class ShopWindow {
         g.setColor(active ? new Color(140, 115, 55) : new Color(55, 50, 35));
         g.drawRoundRect(x, y, w, h, 4, 4);
 
-        g.setFont(new Font("Monospaced", Font.BOLD, 9));
+        g.setFont(new Font("Arial", Font.BOLD, 9));
         FontMetrics fm = g.getFontMetrics();
         g.setColor(active ? new Color(210, 185, 110) : new Color(80, 72, 48));
         g.drawString(arrow, x + (w - fm.stringWidth(arrow)) / 2, y + h - 4);

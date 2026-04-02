@@ -254,7 +254,7 @@ public class RemotePlayer extends Entity {
         g2.drawRect(bodyX, bodyY, bodyW, bodyH);
 
         // ---- Name tag above the head ----
-        g2.setFont(new Font("Monospaced", Font.BOLD, 9));
+        g2.setFont(new Font("Arial", Font.BOLD, 9));
         FontMetrics fm = g2.getFontMetrics();
         int tagW  = fm.stringWidth(id) + 6;
         int tagX  = footX - tagW / 2;

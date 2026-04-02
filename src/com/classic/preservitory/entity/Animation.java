@@ -26,7 +26,9 @@ public class Animation {
         WALKING,
         CHOPPING,
         MINING,
-        FIGHTING
+        FIGHTING,
+        /** A non-looping player-triggered attack (punch, sword slash, …). */
+        ATTACKING
     }
 
     // -----------------------------------------------------------------------
@@ -35,6 +37,12 @@ public class Animation {
 
     private State  state = State.IDLE;
     private double timer = 0.0;   // seconds since the last state change
+
+    // Attack-specific data — only meaningful when state == ATTACKING.
+    // Updated each frame by GamePanel so Player.render() can read them
+    // without needing a direct reference to AttackSystem.
+    private String attackAnimName = "punch";
+    private int    attackFrame    = 0;
 
     // -----------------------------------------------------------------------
     //  State management
@@ -68,6 +76,22 @@ public class Animation {
 
     /** Seconds elapsed since the current state started. */
     public double getTimer() { return timer; }
+
+    /**
+     * Write the current attack animation name and frame index.
+     * Called by GamePanel each update while {@link State#ATTACKING} is active.
+     */
+    public void setAttackData(String animName, int frame) {
+        setState(State.ATTACKING);
+        this.attackAnimName = animName;
+        this.attackFrame    = frame;
+    }
+
+    /** Animation name to render while in {@link State#ATTACKING}. */
+    public String getAttackAnimName() { return attackAnimName; }
+
+    /** 0-based frame index to render while in {@link State#ATTACKING}. */
+    public int getAttackFrame()       { return attackFrame; }
 
     /**
      * A smooth sine-wave oscillation in the range [0, 1] at the given frequency.

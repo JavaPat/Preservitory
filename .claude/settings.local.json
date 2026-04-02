@@ -24,7 +24,10 @@
       "Bash(find /c/Users/Patri/IdeaProjects/Preservitory-Server/cache/dialogues -name *.json)",
       "Bash(find /c/Users/Patri/IdeaProjects/Preservitory/src -name *.java)",
       "Bash(find /c/Users/Patri/IdeaProjects/Preservitory/src -name *.js -o -name *.ts -o -name *.html)",
-      "Bash(find C:UsersPatriIdeaProjectsPreservitory-Server -type f -name *.java)"
+      "Bash(find C:UsersPatriIdeaProjectsPreservitory-Server -type f -name *.java)",
+      "Bash(find C:UsersPatriIdeaProjectsPreservitory -name *.gradle -o -name pom.xml)",
+      "Bash(find:*)",
+      "Bash(grep:*)"
     ]
   }
 }

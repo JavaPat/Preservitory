@@ -35,7 +35,7 @@ public class UITextField extends UIComponent {
         g.drawRoundRect(x, y, width, height, 8, 8);
 
         // Label above field
-        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        g.setFont(new Font("Arial", Font.PLAIN, 11));
         g.setColor(new Color(220, 200, 120));
         g.drawString(label, x, y - 5);
 
@@ -44,7 +44,7 @@ public class UITextField extends UIComponent {
         boolean blink  = focused && (System.currentTimeMillis() / 500) % 2 == 0;
         if (blink) display += "_";
 
-        g.setFont(new Font("Monospaced", Font.PLAIN, 13));
+        g.setFont(new Font("Arial", Font.PLAIN, 13));
         g.setColor(Color.WHITE);
         g.drawString(display, x + 10, y + height / 2 + 5);
     }

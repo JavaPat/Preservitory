@@ -59,6 +59,17 @@ class CombatTab implements Tab {
         else                             select("DEFENSIVE");
     }
 
+    String getHoveredButtonLabel(int sx, int sy, int px, int pw) {
+        if (styleButtonsY <= 0 || sy < styleButtonsY || sy >= styleButtonsY + 22) return null;
+        int bx   = px + 8;
+        int bw   = pw - 16;
+        int btnW = (bw - 4) / 3;
+        if (sx < bx || sx >= bx + bw) return null;
+        if (sx < bx + btnW)         return "Accurate attack style";
+        if (sx < bx + 2 * btnW + 2) return "Aggressive attack style";
+        return "Defensive attack style";
+    }
+
     // -----------------------------------------------------------------------
     //  Rendering
     // -----------------------------------------------------------------------
@@ -68,7 +79,7 @@ class CombatTab implements Tab {
         int bw = pw - 16;
         int y  = CONTENT_Y + 10;
 
-        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setFont(new Font("Arial", Font.BOLD, 10));
         drawOutlined(g, "ATTACK STYLE", px + pw / 2 - 30, y + 2,
                 new Color(200, 185, 100), new Color(0, 0, 0, 160));
         y += 18;
@@ -98,7 +109,7 @@ class CombatTab implements Tab {
             g.drawRoundRect(bx2, y, btnW, 22, 5, 5);
 
             // Label
-            g.setFont(new Font("Monospaced", Font.BOLD, 9));
+            g.setFont(new Font("Arial", Font.BOLD, 9));
             FontMetrics fm = g.getFontMetrics();
             int lw = fm.stringWidth(labels[i]);
             g.setColor(on ? new Color(220, 200, 110) : new Color(130, 115, 65));
@@ -107,7 +118,7 @@ class CombatTab implements Tab {
         y += 34;
 
         // Description line under selected style
-        g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+        g.setFont(new Font("Arial", Font.PLAIN, 9));
         String desc = switch (activeCombatStyle) {
             case "ACCURATE"   -> "Improves accuracy";
             case "AGGRESSIVE" -> "Improves strength";

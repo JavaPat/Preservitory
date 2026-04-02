@@ -79,11 +79,11 @@ public class LoginScreen {
     //  Precomputed positions
     // -----------------------------------------------------------------------
 
-    private final int screenW, screenH;
-    private final int boxX, boxY;
-    private final int logoY;
-    private final int submitX, submitY, submitW;
-    private final int toggleBtnY;
+    private int screenW, screenH;
+    private int boxX, boxY;
+    private int logoY;
+    private int submitX, submitY, submitW;
+    private int toggleBtnY;
 
     // -----------------------------------------------------------------------
     //  Constructor
@@ -97,43 +97,14 @@ public class LoginScreen {
         this.screenH    = screenH;
         this.onLogin    = onLogin;
         this.onRegister = onRegister;
+        usernameField = new UITextField(0, 0, 0, FIELD_H, "Username", false, 24);
+        passwordField = new UITextField(0, 0, 0, FIELD_H, "Password", true, 32);
+        submitButton  = new UIButton(0, 0, 0, SUBMIT_H, "Login", this::submit);
+        toggleButton  = new UIButton(0, 0, 0, TOGGLE_H, "Create a new account instead", this::toggleMode);
 
-        // Box centered, shifted down slightly to leave room for the logo above
-        boxX = (screenW - BOX_W) / 2;
-        boxY = (screenH - BOX_H) / 2 + 20;
-        logoY = boxY - LOGO_H - LOGO_MARGIN;
-
-        int fieldX = boxX + PAD;
-        int fieldW  = BOX_W - PAD * 2;
-
-        // --- Vertical flow ---
-        // Start the cursor below the header (title + subtitle + separator).
-        int y = boxY + HEADER_H;
-
-        usernameField = new UITextField(fieldX, y + LABEL_SPACE - 12, fieldW, FIELD_H, "Username", false, 24);
-        y += LABEL_SPACE + FIELD_H + FIELD_GAP;
-
-        passwordField = new UITextField(fieldX, y + LABEL_SPACE - 10, fieldW, FIELD_H, "Password", true, 32);
-        y += LABEL_SPACE + FIELD_H + BUTTON_GAP;
-
-        submitButton  = new UIButton(fieldX, y, fieldW, SUBMIT_H, "Login", this::submit);
-        submitX = fieldX;
-        submitY = y;
-        submitW = fieldW;
-
-        // Register button sits just below the box, outside it
-        int tY = boxY + BOX_H + TOGGLE_MARGIN;
-        toggleButton  = new UIButton(fieldX, tY, fieldW, TOGGLE_H, "Create a new account instead", this::toggleMode);
-        toggleBtnY = tY;
-
-        // Music toggle — bottom-right corner, 32×32
         int btnSize = 32;
-        musicButton = new MusicToggleButton(
-                screenW - btnSize - 10,
-                screenH - btnSize - 10,
-                btnSize,
-                musicManager
-        );
+        musicButton = new MusicToggleButton(0, 0, btnSize, musicManager);
+        layout(screenW, screenH);
 
         usernameField.setFocused(true);
     }
@@ -142,7 +113,8 @@ public class LoginScreen {
     //  Public API
     // -----------------------------------------------------------------------
 
-    public void render(Graphics2D g) {
+    public void render(Graphics2D g, int screenW, int screenH) {
+        layout(screenW, screenH);
         g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
                 RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
@@ -220,6 +192,35 @@ public class LoginScreen {
     //  Drawing
     // -----------------------------------------------------------------------
 
+    private void layout(int screenW, int screenH) {
+        this.screenW = screenW;
+        this.screenH = screenH;
+
+        boxX = (screenW - BOX_W) / 2;
+        boxY = (screenH - BOX_H) / 2 + 20;
+        logoY = boxY - LOGO_H - LOGO_MARGIN;
+
+        int fieldX = boxX + PAD;
+        int fieldW = BOX_W - PAD * 2;
+        int y = boxY + HEADER_H;
+
+        usernameField.setBounds(fieldX, y + LABEL_SPACE - 12, fieldW, FIELD_H);
+        y += LABEL_SPACE + FIELD_H + FIELD_GAP;
+
+        passwordField.setBounds(fieldX, y + LABEL_SPACE - 10, fieldW, FIELD_H);
+        y += LABEL_SPACE + FIELD_H + BUTTON_GAP;
+
+        submitX = fieldX;
+        submitY = y;
+        submitW = fieldW;
+        submitButton.setBounds(submitX, submitY, submitW, SUBMIT_H);
+
+        toggleBtnY = boxY + BOX_H + TOGGLE_MARGIN;
+        toggleButton.setBounds(fieldX, toggleBtnY, fieldW, TOGGLE_H);
+
+        musicButton.setBounds(screenW - 42, screenH - 42, 32, 32);
+    }
+
     private void drawBackground(Graphics2D g) {
         BufferedImage bg = AssetManager.getImage("login_bg");
         if (bg != null) {
@@ -269,13 +270,13 @@ public class LoginScreen {
     private void drawHeader(Graphics2D g) {
         g.setColor(TEXT_COLOR);
 
-        g.setFont(new Font("Monospaced", Font.BOLD, 16));
+        g.setFont(new Font("Arial", Font.BOLD, 16));
         FontMetrics titleFm = g.getFontMetrics();
         String title = registerMode ? "Create Account" : "Account Login";
         int titleX = boxX + (BOX_W - titleFm.stringWidth(title)) / 2;
         g.drawString(title, titleX, boxY + 22);
 
-        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        g.setFont(new Font("Arial", Font.PLAIN, 11));
         FontMetrics subFm = g.getFontMetrics();
         String sub = "Enter your credentials to continue.";
         int subX = boxX + (BOX_W - subFm.stringWidth(sub)) / 2;
@@ -294,7 +295,7 @@ public class LoginScreen {
             return;
         }
         // Draw the label centered over the image
-        g.setFont(new Font("Monospaced", Font.BOLD, 12));
+        g.setFont(new Font("Arial", Font.BOLD, 12));
         FontMetrics fm = g.getFontMetrics();
         String label = registerMode ? "Register" : "Login";
         int textX = submitX + (submitW - fm.stringWidth(label)) / 2;
@@ -308,7 +309,7 @@ public class LoginScreen {
     /** Draws the status message centered between the register button and the screen bottom. */
     private void drawStatus(Graphics2D g) {
         if (statusMessage == null || statusMessage.isEmpty()) return;
-        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        g.setFont(new Font("Arial", Font.PLAIN, 11));
         g.setColor(TEXT_COLOR);
         FontMetrics fm = g.getFontMetrics();
         int areaTop    = toggleBtnY + TOGGLE_H;

@@ -19,7 +19,7 @@ public class UILabel extends UIComponent {
     public void render(Graphics2D g) {
         if (!visible) return;
 
-        g.setFont(new Font("Monospaced", Font.BOLD, 14));
+        g.setFont(new Font("Arial", Font.BOLD, 14));
 
         // Shadow
         g.setColor(new Color(0, 0, 0, 200));

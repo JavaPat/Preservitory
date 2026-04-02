@@ -70,9 +70,10 @@ public class Tree extends Entity {
     }
 
     public boolean containsPoint(int px, int py) {
+        int pad = 16;
         return state == State.ALIVE
-                && px >= x && px <= x + width
-                && py >= y && py <= y + height;
+                && px >= x - pad && px <= x + width  + pad
+                && py >= y - pad && py <= y + height + pad;
     }
 
     // -----------------------------------------------------------------------

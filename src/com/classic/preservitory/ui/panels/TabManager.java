@@ -8,7 +8,7 @@ package com.classic.preservitory.ui.panels;
  */
 class TabManager {
 
-    private TabType activeTab = TabType.INVENTORY;
+    private TabType activeTab = TabType.NONE;
 
     TabType getActiveTab() {
         return activeTab;
@@ -16,5 +16,17 @@ class TabManager {
 
     void setTab(TabType tab) {
         activeTab = tab;
+    }
+
+    void clearTab() {
+        activeTab = TabType.NONE;
+    }
+
+    boolean hasActiveTab() {
+        return activeTab != TabType.NONE;
+    }
+
+    void toggleTab(TabType tab) {
+        activeTab = (activeTab == tab) ? TabType.NONE : tab;
     }
 }

@@ -4,6 +4,7 @@ import com.classic.preservitory.client.definitions.ItemDefinitionManager;
 import com.classic.preservitory.entity.Enemy;
 import com.classic.preservitory.entity.Entity;
 import com.classic.preservitory.entity.NPC;
+import com.classic.preservitory.client.settings.ClientSettings;
 import com.classic.preservitory.system.CombatSystem;
 import com.classic.preservitory.system.Pathfinding;
 import com.classic.preservitory.system.SoundSystem;
@@ -23,7 +24,6 @@ import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.List;
 import javax.swing.SwingUtilities;
-import java.util.function.BooleanSupplier;
 
 /**
  * Handles all player input (keyboard, mouse) and manages active interaction
@@ -58,6 +58,7 @@ class GameInputHandler {
     // -------------------------------------------------------------------------
 
     double logoutConfirmTimer = 0;
+    private boolean shiftDown = false;
 
     // -------------------------------------------------------------------------
     //  Hover position (screen-space, updated by mouse motion)
@@ -66,11 +67,8 @@ class GameInputHandler {
     int hoverX = -1;
     int hoverY = -1;
     int hoveredTabIndex = -1;
-    private Runnable pendingAction;
-    private int targetX;
-    private int targetY;
-    private BooleanSupplier pendingActionValid = () -> false;
-
+    private boolean listeningForKeybind = false;
+    private ClientSettings.Action selectedAction;
     // -------------------------------------------------------------------------
 
     GameInputHandler(GamePanel panel) {
@@ -81,9 +79,36 @@ class GameInputHandler {
     //  Keyboard
     // -------------------------------------------------------------------------
 
-    void handleKey(int keyCode) {
-        if (panel.authRequired) {
+    void handleKey(java.awt.event.KeyEvent e) {
+        int keyCode = e.getKeyCode();
+        if (listeningForKeybind) {
+            if (keyCode == KeyEvent.VK_ESCAPE) {
+                listeningForKeybind = false;
+                selectedAction = null;
+                panel.rightPanel.setListeningKeybindingAction(null);
+                return;
+            }
+            if (selectedAction != null) {
+                panel.settings.setKeyBinding(selectedAction, keyCode);
+                panel.settings.save();
+            }
+            listeningForKeybind = false;
+            selectedAction = null;
+            panel.rightPanel.setListeningKeybindingAction(null);
+            return;
+        }
+        if (handlePanelKeybind(keyCode)) {
+            return;
+        }
+        if (keyCode == KeyEvent.VK_ESCAPE && panel.rightPanel.hasActiveTab()) {
+            panel.closeActiveInterfacePanel();
+            return;
+        }
+        if (panel.shouldRenderLoginScreen() && !Constants.EDITOR_MODE) {
             panel.loginScreen.handleKey(keyCode);
+            return;
+        }
+        if (panel.isPreGameState() && !Constants.EDITOR_MODE) {
             return;
         }
 
@@ -123,6 +148,25 @@ class GameInputHandler {
         }
 
         // Normal mode
+        if (Constants.EDITOR_MODE) {
+            boolean ctrl = (e.getModifiersEx() & KeyEvent.CTRL_DOWN_MASK) != 0;
+            if (ctrl && keyCode == KeyEvent.VK_Z) { System.out.println("UNDO PRESSED"); panel.editorActions.undo(panel.getTileMap(), panel.editorState); panel.repaint(); return; }
+            if (ctrl && keyCode == KeyEvent.VK_R) { System.out.println("REDO PRESSED"); panel.editorActions.redo(panel.getTileMap(), panel.editorState); panel.repaint(); return; }
+            if (keyCode == KeyEvent.VK_1) panel.setSelectedTileId(0); // grass
+            if (keyCode == KeyEvent.VK_2) panel.setSelectedTileId(1); // path
+            if (keyCode == KeyEvent.VK_3) panel.setSelectedTileId(2); // water
+            if (keyCode == KeyEvent.VK_4) panel.setSelectedTileId(3); // stone
+            if (!ctrl && keyCode == KeyEvent.VK_R) {
+                int rot = (panel.editorState.getSelectedRotation() + 90) % 360;
+                panel.editorState.setSelectedRotation(rot);
+                panel.repaint();
+                return;
+            }
+            if (keyCode == KeyEvent.VK_N) panel.newMap(64, 64);
+            if (keyCode == KeyEvent.VK_S) panel.saveMap("map.json");
+            if (keyCode == KeyEvent.VK_L) panel.loadMap("map.json");
+        }
+
         switch (keyCode) {
             case KeyEvent.VK_ENTER:
                 if (panel.gameState == GamePanel.GameState.PLAYING) {
@@ -159,10 +203,11 @@ class GameInputHandler {
     }
 
     void handleCharTyped(char c) {
-        if (panel.authRequired) {
+        if (panel.shouldRenderLoginScreen()) {
             panel.loginScreen.handleChar(c);
             return;
         }
+        if (panel.isPreGameState() && !Constants.EDITOR_MODE) return;
         if (!isTypingChat) return;
         if (c < 32 || c > 126) return;
         if (chatInput.length() < 80) chatInput.append(c);
@@ -185,7 +230,7 @@ class GameInputHandler {
         }
 
         if (!panel.clientConnection.isConnected()) {
-            panel.chatBox.post("Server offline. Message not sent.", ChatBox.COLOR_SYSTEM);
+            panel.loginScreen.setStatus("Server offline.");
             return;
         }
 
@@ -200,6 +245,24 @@ class GameInputHandler {
         int cx = e.getX();
         int cy = e.getY();
 
+        if (Constants.EDITOR_MODE) {
+            if (SwingUtilities.isLeftMouseButton(e)) {
+                if (clickInsideEditorPanel(cx, cy)) {
+                    handleEditorClick(cx, cy);
+                    return;
+                }
+                if (panel.editorState.getSelectedObjectKey() != null) {
+                    placeObject();
+                } else {
+                    panel.setPainting(true);
+                    paintTile();
+                }
+            }
+            return;
+        }
+
+        shiftDown = e.isShiftDown();
+
         if (SwingUtilities.isRightMouseButton(e)) {
             //System.out.println("RIGHT CLICK");
             handleRightClick(cx, cy);
@@ -212,8 +275,22 @@ class GameInputHandler {
     }
 
     private void handleLeftClick(int cx, int cy) {
-        if (panel.authRequired) {
+        if (panel.shouldRenderLoginScreen()) {
             panel.loginScreen.handleClick(cx, cy);
+            return;
+        }
+        if (panel.isPreGameState() && !Constants.EDITOR_MODE) {
+            return;
+        }
+
+        if (panel.rightPanel.getActiveTab() == TabType.SETTINGS
+                && !panel.rightPanel.isInsideSettingsPanel(cx, cy)
+                && !panel.settingsCogBounds.contains(cx, cy)) {
+            panel.closeActiveInterfacePanel();
+        }
+
+        if (panel.settingsCogBounds.contains(cx, cy)) {
+            handleSettingsCogClick();
             return;
         }
 
@@ -229,12 +306,12 @@ class GameInputHandler {
             return;
         }
 
-        if (isTypingChat && cx < Constants.PANEL_X) return;
+        if (isTypingChat && cx < panel.getPanelX()) return;
 
         // ---- Right panel ----
-        if (cx >= Constants.PANEL_X) {
-            if (cx >= GamePanel.LOGOUT_BTN_X && cx < GamePanel.LOGOUT_BTN_X + GamePanel.LOGOUT_BTN_W
-                    && cy >= GamePanel.LOGOUT_BTN_Y && cy < GamePanel.LOGOUT_BTN_Y + GamePanel.LOGOUT_BTN_H) {
+        if (cx >= panel.getPanelX()) {
+            if (cx >= panel.getLogoutBtnX() && cx < panel.getLogoutBtnX() + panel.getLogoutBtnW()
+                    && cy >= panel.getLogoutBtnY() && cy < panel.getLogoutBtnY() + GamePanel.LOGOUT_BTN_H) {
                 handleLogoutClick();
                 return;
             }
@@ -248,15 +325,29 @@ class GameInputHandler {
                 int tabIndex = getHoveredTabIndex(cx, cy);
                 if (tabIndex >= 0) {
                     TabConfig clickedTab = TabConfig.TABS.get(tabIndex);
-                    panel.rightPanel.tabManager.setTab(clickedTab.type);
-                    panel.rightPanel.onTabSelected(clickedTab.type);
+                    panel.toggleActiveInterfacePanel(clickedTab.type);
+                    if (panel.rightPanel.getActiveTab() == clickedTab.type) {
+                        panel.rightPanel.onTabSelected(clickedTab.type);
+                    }
                 }
                 return;
             }
 
+            // Shift-click drop
+            if (panel.settings.isShiftClickDrop() && shiftDown
+                    && !panel.shopWindow.isOpen()
+                    && panel.rightPanel.getActiveTab() == TabType.INVENTORY) {
+                int dropItemId = panel.rightPanel.getClickedInventoryItemId(cx, cy, panel.player, panel.getPanelX());
+                if (dropItemId >= 0) {
+                    String name = com.classic.preservitory.client.definitions.ItemDefinitionManager.get(dropItemId).name;
+                    handleDropItem(dropItemId, name);
+                    return;
+                }
+            }
+
             // Shop sell via inventory click
             if (panel.shopWindow.isOpen()) {
-                int sellItemId = panel.rightPanel.getClickedInventoryItemId(cx, cy, panel.player);
+                int sellItemId = panel.rightPanel.getClickedInventoryItemId(cx, cy, panel.player, panel.getPanelX());
                 if (sellItemId >= 0 && panel.shopWindow.canSell(sellItemId)) {
                     panel.clientConnection.sendSell(sellItemId);
                     String name = com.classic.preservitory.client.definitions.ItemDefinitionManager.get(sellItemId).name;
@@ -267,7 +358,7 @@ class GameInputHandler {
 
             // Inventory click → equip (only when shop is closed)
             if (!panel.shopWindow.isOpen()) {
-                int equipItemId = panel.rightPanel.getClickedInventoryItemId(cx, cy, panel.player);
+                int equipItemId = panel.rightPanel.getClickedInventoryItemId(cx, cy, panel.player, panel.getPanelX());
                 if (equipItemId >= 0) {
                     com.classic.preservitory.client.definitions.ItemDefinition def =
                             com.classic.preservitory.client.definitions.ItemDefinitionManager.get(equipItemId);
@@ -279,13 +370,13 @@ class GameInputHandler {
                 }
             }
 
-            panel.rightPanel.handleClick(cx, cy);
+            panel.rightPanel.handleClick(cx, cy, panel.getPanelX());
             return;
         }
 
         // ---- Dialogue mode: chatbox area advances / selects options ----
         if (panel.gameState == GamePanel.GameState.IN_DIALOGUE) {
-            int chatBoxTop = Constants.VIEWPORT_H - GamePanel.CHAT_H;
+            int chatBoxTop = panel.getHeight() - GamePanel.CHAT_H;
             if (cy >= chatBoxTop) {
                 if (panel.chatBox.hasOptions()) {
                     int optIndex = panel.chatBox.getOptionIndexAtY(cy - chatBoxTop);
@@ -293,8 +384,9 @@ class GameInputHandler {
                 } else {
                     panel.clientConnection.sendDialogueNext();
                 }
+                return;
             }
-            return;
+            closeDialogue();
         }
 
         // ---- PLAYING state ----
@@ -310,7 +402,7 @@ class GameInputHandler {
         }
 
         if (!panel.clientConnection.isConnected()) {
-            panel.showMessage("Server offline. Start the server to play.");
+            panel.loginScreen.setStatus("Server offline.");
             return;
         }
 
@@ -356,8 +448,9 @@ class GameInputHandler {
         }
 
         // Ground: pathfind to the clicked tile
-        closeInterfaces();
+        closeTransientInterfacesForMovement();
         stopAllActivities();
+        panel.clientConnection.sendClearPendingInteraction();
         int startCol = Pathfinding.pixelToTileCol(panel.player.getCenterX());
         int startRow = Pathfinding.pixelToTileRow(panel.player.getCenterY());
         List<Point> path = Pathfinding.findPath(startCol, startRow, clickTileCol, clickTileRow,
@@ -369,14 +462,32 @@ class GameInputHandler {
         }
     }
 
+    private void handleSettingsCogClick() {
+        if (panel.combatSystem.isInCombat()) {
+            panel.showMessage("You are in combat.");
+            return;
+        }
+        if (panel.movementSystem.isMoving()) {
+            panel.movementSystem.clearPath();
+            panel.mouseHandler.clearTarget();
+        }
+        panel.toggleActiveInterfacePanel(TabType.SETTINGS);
+    }
+
+    void startKeybindingRebind(ClientSettings.Action action) {
+        listeningForKeybind = true;
+        selectedAction = action;
+        panel.rightPanel.setListeningKeybindingAction(action);
+    }
+
     private void handleRightClick(int cx, int cy) {
         panel.closeContextMenu();
 
-        if (panel.authRequired || panel.gameState != GamePanel.GameState.PLAYING) {
+        if (panel.isPreGameState() || panel.gameState != GamePanel.GameState.PLAYING) {
             return;
         }
 
-        if (cx >= Constants.PANEL_X) {
+        if (cx >= panel.getPanelX()) {
             openInventoryContextMenu(cx, cy);
             return;
         }
@@ -425,8 +536,25 @@ class GameInputHandler {
     //  Cursor
     // -------------------------------------------------------------------------
 
+    void clearUiHoverState() {
+        hoveredTabIndex = -1;
+        panel.rightPanel.setHoveredTabIndex(-1);
+    }
+
     void updateCursorForHover(int mx, int my) {
+        if (Constants.EDITOR_MODE) { updateEditorTooltip(mx, my); return; }
+        if (panel.isPreGameState()) {
+            clearUiHoverState();
+            panel.setHoverText(null);
+            panel.setCursor(Cursor.getDefaultCursor());
+            return;
+        }
         panel.setHoverText(null);
+        if (System.currentTimeMillis() < panel.ignoreHoverUntil) {
+            clearUiHoverState();
+            panel.setCursor(Cursor.getDefaultCursor());
+            return;
+        }
         if (panel.contextMenuOpen) {
             if (isFarFromContextMenu(mx, my)) {
                 panel.closeContextMenu();
@@ -438,6 +566,13 @@ class GameInputHandler {
         hoveredTabIndex = getHoveredTabIndex(mx, my);
         panel.rightPanel.setHoveredTabIndex(hoveredTabIndex);
         if (hoveredTabIndex >= 0) {
+            panel.setHoverText(getTabHoverText(hoveredTabIndex));
+            panel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            return;
+        }
+
+        if (panel.settingsCogBounds.contains(mx, my)) {
+            panel.setHoverText("Settings");
             panel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             return;
         }
@@ -453,7 +588,21 @@ class GameInputHandler {
             return;
         }
 
-        if (mx >= Constants.PANEL_X) {
+        if (mx >= panel.getPanelX()) {
+            if (mx >= panel.getLogoutBtnX() && mx < panel.getLogoutBtnX() + panel.getLogoutBtnW()
+                    && my >= panel.getLogoutBtnY() && my < panel.getLogoutBtnY() + GamePanel.LOGOUT_BTN_H) {
+                panel.setHoverText("Logout");
+                panel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                return;
+            }
+
+            String buttonLabel = panel.rightPanel.getHoveredButtonLabel(mx, my, panel.getPanelX());
+            if (buttonLabel != null) {
+                panel.setHoverText(buttonLabel);
+                panel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                return;
+            }
+
             String inventoryItemName = panel.rightPanel.getHoveredInventoryItemName(panel.player);
             if (inventoryItemName != null) {
                 panel.setHoverText(panel.shopWindow.isOpen()
@@ -466,7 +615,7 @@ class GameInputHandler {
             return;
         }
 
-        if (mx >= Constants.PANEL_X || panel.gameState != GamePanel.GameState.PLAYING) {
+        if (mx >= panel.getPanelX() || panel.gameState != GamePanel.GameState.PLAYING) {
             panel.setCursor(Cursor.getDefaultCursor());
             return;
         }
@@ -514,6 +663,42 @@ class GameInputHandler {
         }
 
         panel.setCursor(Cursor.getDefaultCursor());
+    }
+
+    private String getTabHoverText(int tabIndex) {
+        if (tabIndex < 0 || tabIndex >= TabConfig.TABS.size()) {
+            return null;
+        }
+        return switch (TabConfig.TABS.get(tabIndex).type) {
+            case COMBAT -> "Combat";
+            case INVENTORY -> "Inventory";
+            case SKILLS -> "Skills";
+            case EQUIPMENT -> "Equipment";
+            case QUESTS -> "Quests";
+            case SETTINGS -> "Settings";
+            case KEYBINDINGS, NONE -> null;
+        };
+    }
+
+    private boolean handlePanelKeybind(int keyCode) {
+        for (ClientSettings.Action action : ClientSettings.Action.values()) {
+            if (keyCode == panel.settings.getKeyBinding(action)) {
+                panel.toggleActiveInterfacePanel(mapActionToTab(action));
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private TabType mapActionToTab(ClientSettings.Action action) {
+        return switch (action) {
+            case COMBAT -> TabType.COMBAT;
+            case INVENTORY -> TabType.INVENTORY;
+            case SKILLS -> TabType.SKILLS;
+            case EQUIPMENT -> TabType.EQUIPMENT;
+            case QUESTS -> TabType.QUESTS;
+            case SETTINGS -> TabType.SETTINGS;
+        };
     }
 
     private String getTreeDisplayName(Tree tree) {
@@ -566,33 +751,29 @@ class GameInputHandler {
     // -------------------------------------------------------------------------
 
     private void activateNpc(NPC npc) {
-        queueInteraction(npc,
-                () -> activeNPC = npc,
-                () -> panel.clientWorld.getNpc(npc.getId()) != null);
+        beginInteractionPath(npc);
+        activeNPC = npc;
     }
 
     private void activateEnemy(Enemy enemy) {
-        queueInteraction(enemy,
-                () -> activeEnemy = enemy,
-                () -> isEnemyStillPresent(enemy.getId()));
+        beginInteractionPath(enemy);
+        activeEnemy = enemy;
+        panel.clientConnection.sendAttack(enemy.getId());
     }
 
     private void activateTree(Tree tree) {
-        queueInteraction(tree,
-                () -> activeTree = tree,
-                tree::isAlive);
+        beginInteractionPath(tree);
+        activeTree = tree;
     }
 
     private void activateRock(Rock rock) {
-        queueInteraction(rock,
-                () -> activeRock = rock,
-                rock::isSolid);
+        beginInteractionPath(rock);
+        activeRock = rock;
     }
 
     private void activateLoot(Loot loot) {
-        queueInteraction(loot,
-                () -> activeLoot = loot,
-                () -> isLootStillPresent(loot.getId()));
+        beginInteractionPath(loot);
+        activeLoot = loot;
     }
 
     private String buildLootExamineText(Loot loot) {
@@ -603,11 +784,10 @@ class GameInputHandler {
     }
 
     private void openInventoryContextMenu(int cx, int cy) {
-        String itemName = panel.rightPanel.getHoveredInventoryItemName(panel.player);
-        int itemId = panel.rightPanel.getClickedInventoryItemId(cx, cy, panel.player);
-        if (itemName == null || itemId < 0) {
-            return;
-        }
+        if (panel.rightPanel.getActiveTab() != TabType.INVENTORY) return;
+        int itemId = panel.rightPanel.getClickedInventoryItemId(cx, cy, panel.player, panel.getPanelX());
+        if (itemId < 0) return;
+        String itemName = com.classic.preservitory.client.definitions.ItemDefinitionManager.get(itemId).name;
 
         List<GamePanel.ContextMenuOption> options = new ArrayList<>();
         options.add(new GamePanel.ContextMenuOption("Use " + itemName, () -> handleUseItem(itemId, itemName)));
@@ -622,8 +802,17 @@ class GameInputHandler {
     }
 
     private void handleDropItem(int itemId, String itemName) {
+        // Optimistic client removal — full stack for stackable, 1 for non-stackable.
+        int amount = 1;
+        for (com.classic.preservitory.item.Item slot : panel.player.getInventory().getSlots()) {
+            if (slot != null && slot.getItemId() == itemId) {
+                if (slot.isStackable()) amount = slot.getCount();
+                break;
+            }
+        }
+        panel.player.getInventory().removeItem(itemId, amount);
         panel.clientConnection.sendDrop(itemId);
-        panel.showMessage("Drop " + itemName);
+        panel.showMessage("You drop the " + itemName + ".");
     }
 
     int getContextMenuOptionIndex(int mx, int my) {
@@ -642,7 +831,7 @@ class GameInputHandler {
     }
 
     int getContextMenuWidth() {
-        Font font = new Font("Monospaced", Font.PLAIN, 11);
+        Font font = new Font("Arial", Font.PLAIN, 11);
         int width = 0;
         FontMetrics metrics = panel.getFontMetrics(font);
         for (GamePanel.ContextMenuOption option : panel.contextMenuOptions) {
@@ -675,21 +864,11 @@ class GameInputHandler {
                 || my < menuY - margin || my > menuY + menuHeight + margin;
     }
 
-    private void queueInteraction(Entity target, Runnable action, BooleanSupplier validator) {
-        closeInterfaces();
+    private void beginInteractionPath(Entity target) {
+        closeTransientInterfacesForMovement();
         stopAllActivities();
-        pendingAction = action;
-        pendingActionValid = validator != null ? validator : () -> true;
-        targetX = Pathfinding.pixelToTileCol(target.getCenterX());
-        targetY = Pathfinding.pixelToTileRow(target.getCenterY());
+        panel.player.faceTarget(target);
         setApproachTarget(target);
-    }
-
-    private void clearPendingAction() {
-        pendingAction = null;
-        pendingActionValid = () -> false;
-        targetX = 0;
-        targetY = 0;
     }
 
     private boolean isEnemyStillPresent(String enemyId) {
@@ -740,7 +919,6 @@ class GameInputHandler {
 
     void stopAllActivities() {
         panel.closeContextMenu();
-        clearPendingAction();
         panel.woodcuttingSystem.stopChopping();
         panel.miningSystem.stopMining();
         panel.combatSystem.stopCombat();
@@ -762,7 +940,13 @@ class GameInputHandler {
 
     void closeInterfaces() {
         closeDialogue();
+        panel.closeActiveInterfacePanel();
         if (panel.shopWindow.isOpen()) panel.shopWindow.close();
+        panel.questCompleteWindow.softClose();
+    }
+
+    void closeTransientInterfacesForMovement() {
+        closeDialogue();
         panel.questCompleteWindow.softClose();
     }
 
@@ -786,7 +970,6 @@ class GameInputHandler {
     // -------------------------------------------------------------------------
 
     void updateInteractions(double deltaTime) {
-        updatePendingAction();
         updateTreeInteraction(deltaTime);
         updateRockInteraction(deltaTime);
         updateCombat(deltaTime);
@@ -799,25 +982,6 @@ class GameInputHandler {
             logoutConfirmTimer = Math.max(0, logoutConfirmTimer - deltaTime);
     }
 
-    private void updatePendingAction() {
-        if (pendingAction == null) {
-            return;
-        }
-        if (!pendingActionValid.getAsBoolean()) {
-            clearPendingAction();
-            return;
-        }
-        if (isPlayerInRange(targetX, targetY)) {
-            Runnable action = pendingAction;
-            clearPendingAction();
-            action.run();
-            return;
-        }
-        if (!panel.movementSystem.isMoving() && !panel.movementSystem.hasPath() && !panel.mouseHandler.hasTarget()) {
-            clearPendingAction();
-        }
-    }
-
     private void updateTreeInteraction(double deltaTime) {
         if (activeTree == null) return;
         if (!activeTree.isAlive()) {
@@ -826,20 +990,16 @@ class GameInputHandler {
             return;
         }
         if (isWithinInteractionRange(panel.player, activeTree)) {
-            if (!panel.woodcuttingSystem.isChopping()) {
-                panel.woodcuttingSystem.startChopping(activeTree);
-                panel.showMessage("You swing your axe...");
+            if (panel.woodcuttingSystem.isChopping()) {
+                return;
             }
-            if (panel.woodcuttingSystem.update(deltaTime)) sendChopRequest();
+            sendChopRequest();
         }
     }
 
     private void sendChopRequest() {
         if (activeTree != null) panel.clientConnection.sendChop(activeTree.getId());
-        panel.woodcuttingSystem.stopChopping();
         activeTree = null;
-        panel.soundSystem.play(SoundSystem.Sound.CHOP);
-        panel.showMessage("Chop request sent to server.");
     }
 
     private void updateRockInteraction(double deltaTime) {
@@ -850,21 +1010,27 @@ class GameInputHandler {
             return;
         }
         if (isWithinInteractionRange(panel.player, activeRock)) {
-            if (!panel.miningSystem.isMining()) {
-                panel.miningSystem.startMining(activeRock);
-                panel.showMessage("You swing your pickaxe...");
-            }
-            if (panel.miningSystem.update(deltaTime)) sendMineRequest();
+            sendMineRequest();
         }
     }
 
     private void sendMineRequest() {
         String rockId = (activeRock != null) ? activeRock.getId() : null;
         if (rockId != null) panel.clientConnection.sendMine(rockId);
-        panel.miningSystem.stopMining();
         activeRock = null;
-        panel.soundSystem.play(SoundSystem.Sound.MINE);
-        panel.showMessage("Mine request sent to server.");
+    }
+
+    void startServerApprovedGathering(String skillType, String objectId) {
+        if ("woodcutting".equalsIgnoreCase(skillType)) {
+            Tree tree = panel.clientWorld.getTree(objectId);
+            if (tree == null || !tree.isAlive()) {
+                return;
+            }
+            activeTree = tree;
+            panel.woodcuttingSystem.startChopping(tree);
+            panel.soundSystem.play(SoundSystem.Sound.CHOP);
+            panel.showMessage("You swing your axe...");
+        }
     }
 
     private void updateCombat(double deltaTime) {
@@ -889,6 +1055,8 @@ class GameInputHandler {
         if (activeEnemy == null) return;
         panel.clientConnection.sendAttack(activeEnemy.getId());
         panel.soundSystem.play(SoundSystem.Sound.HIT);
+        // Trigger the attack animation in sync with the combat tick.
+        panel.attackSystem.notifyCombatTick(panel.player);
         if (activeEnemy.isDead()) {
             panel.combatSystem.stopCombat();
             activeEnemy = null;
@@ -925,14 +1093,14 @@ class GameInputHandler {
     private int adjustedX(int screenX) {
         double zoom = panel.getZoom();
         if (zoom == 1.0) return screenX;
-        return (int)((screenX - Constants.VIEWPORT_W / 2.0) / zoom + Constants.VIEWPORT_W / 2.0);
+        return (int)((screenX - panel.getViewportW() / 2.0) / zoom + panel.getViewportW() / 2.0);
     }
 
     /** Convert a raw screen Y inside the viewport to the equivalent pre-zoom Y. */
     private int adjustedY(int screenY) {
         double zoom = panel.getZoom();
         if (zoom == 1.0) return screenY;
-        return (int)((screenY - Constants.VIEWPORT_H / 2.0) / zoom + Constants.VIEWPORT_H / 2.0);
+        return (int)((screenY - panel.getHeight() / 2.0) / zoom + panel.getHeight() / 2.0);
     }
 
     // -------------------------------------------------------------------------
@@ -949,23 +1117,164 @@ class GameInputHandler {
         return distanceTo(a, b) <= Constants.TILE_SIZE * 1.6;
     }
 
-    private boolean isPlayerInRange(int x, int y) {
-        int playerTileX = Pathfinding.pixelToTileCol(panel.player.getCenterX());
-        int playerTileY = Pathfinding.pixelToTileRow(panel.player.getCenterY());
-        return Math.abs(playerTileX - x) <= 1
-                && Math.abs(playerTileY - y) <= 1;
-    }
-
     private int getHoveredTabIndex(int mx, int my) {
-        if (mx < Constants.PANEL_X || my < RightPanel.TAB_Y || my >= RightPanel.CONTENT_Y) {
+        if (mx < panel.getPanelX() || my < RightPanel.TAB_Y || my >= RightPanel.CONTENT_Y) {
             return -1;
         }
 
         for (int i = 0; i < TabConfig.TABS.size(); i++) {
-            if (panel.rightPanel.getTabBounds(i).contains(mx, my)) {
+            if (panel.rightPanel.getTabBounds(i, panel.getPanelX()).contains(mx, my)) {
                 return i;
             }
         }
         return -1;
+    }
+
+    // -------------------------------------------------------------------------
+    //  Editor — UI button click + tooltip
+    // -------------------------------------------------------------------------
+
+    private boolean clickInsideEditorPanel(int mx, int my) {
+        return mx >= panel.getWidth() - GameRenderer.EDITOR_PANEL_W;
+    }
+
+    private void handleEditorClick(int mx, int my) {
+        int btnX = panel.getWidth() - GameRenderer.EDITOR_PANEL_W + 10;
+        int btnW = GameRenderer.EDITOR_PANEL_W - 20;
+
+        for (int i = 0; i < 4; i++) {
+            int by = GameRenderer.EDITOR_TILE_Y + i * GameRenderer.EDITOR_BTN_GAP;
+            if (mx >= btnX && mx <= btnX + btnW && my >= by && my <= by + GameRenderer.EDITOR_BTN_H) {
+                panel.setSelectedTileId(i);
+                panel.editorState.setSelectedObjectKey(null);
+                return;
+            }
+        }
+
+        for (int i = 0; i < 3; i++) {
+            int by = GameRenderer.EDITOR_ACTION_Y + i * GameRenderer.EDITOR_BTN_GAP;
+            if (mx >= btnX && mx <= btnX + btnW && my >= by && my <= by + GameRenderer.EDITOR_BTN_H) {
+                switch (i) {
+                    case 0: panel.newMap(64, 64);    break;
+                    case 1: panel.saveMap("map.json"); break;
+                    case 2: panel.loadMap("map.json"); break;
+                }
+                return;
+            }
+        }
+
+        // Object icon grid
+        java.util.List<String> available = panel.editorState.getAvailableObjects();
+        int halfW = btnW / 2;
+        for (int i = 0; i < available.size(); i++) {
+            int col = i % GameRenderer.EDITOR_ICON_COLS;
+            int row = i / GameRenderer.EDITOR_ICON_COLS;
+            int ix  = btnX + col * halfW + (halfW - GameRenderer.EDITOR_ICON_SIZE) / 2;
+            int iy  = GameRenderer.EDITOR_OBJECT_Y + row * GameRenderer.EDITOR_ICON_ROW_H;
+            if (mx >= ix && mx <= ix + GameRenderer.EDITOR_ICON_SIZE
+                    && my >= iy && my <= iy + GameRenderer.EDITOR_ICON_SIZE) {
+                String key = available.get(i);
+                if (key.equals(panel.editorState.getSelectedObjectKey())) {
+                    panel.editorState.setSelectedObjectKey(null); // deselect on re-click
+                } else {
+                    panel.editorState.setSelectedObjectKey(key);
+                }
+                return;
+            }
+        }
+
+        // "Clear Object" deselect button (shown only when an object is selected)
+        if (panel.editorState.getSelectedObjectKey() != null) {
+            int rows = (available.size() + GameRenderer.EDITOR_ICON_COLS - 1) / GameRenderer.EDITOR_ICON_COLS;
+            int dby  = GameRenderer.EDITOR_OBJECT_Y + rows * GameRenderer.EDITOR_ICON_ROW_H + 4;
+            if (mx >= btnX && mx <= btnX + btnW && my >= dby && my <= dby + 24) {
+                panel.editorState.setSelectedObjectKey(null);
+                panel.repaint();
+                return;
+            }
+        }
+    }
+
+    void updateEditorTooltip(int mx, int my) {
+        int panelX = panel.getWidth() - GameRenderer.EDITOR_PANEL_W;
+        int btnX   = panelX + 10;
+        int btnW   = GameRenderer.EDITOR_PANEL_W - 20;
+
+        // Outside panel — show global help
+        if (mx < panelX) {
+            String help = "1-4: Tiles | Click: Paint | R: Rotate | Ctrl+Z: Undo | Ctrl+R: Redo";
+            String selectedKey = panel.editorState.getSelectedObjectKey();
+            if (selectedKey != null) {
+                help += "  |  Rotation: " + panel.editorState.getSelectedRotation() + "\u00b0";
+            }
+            panel.editorState.setHoverTooltip(help);
+            return;
+        }
+
+        // Tile buttons
+        String[] tileTips = {
+            "Paint grass terrain",
+            "Paint sandy terrain",
+            "Paint water (non-walkable)",
+            "Paint rocky pavement"
+        };
+        for (int i = 0; i < tileTips.length; i++) {
+            int by = GameRenderer.EDITOR_TILE_Y + i * GameRenderer.EDITOR_BTN_GAP;
+            if (mx >= btnX && mx <= btnX + btnW && my >= by && my <= by + GameRenderer.EDITOR_BTN_H) {
+                panel.editorState.setHoverTooltip(tileTips[i]); return;
+            }
+        }
+
+        // Action buttons
+        String[] actionTips = {
+            "Create a new blank map",
+            "Save current map to JSON",
+            "Load map from JSON"
+        };
+        for (int i = 0; i < actionTips.length; i++) {
+            int by = GameRenderer.EDITOR_ACTION_Y + i * GameRenderer.EDITOR_BTN_GAP;
+            if (mx >= btnX && mx <= btnX + btnW && my >= by && my <= by + GameRenderer.EDITOR_BTN_H) {
+                panel.editorState.setHoverTooltip(actionTips[i]); return;
+            }
+        }
+
+        // Object icon tooltips
+        java.util.List<String> available = panel.editorState.getAvailableObjects();
+        int halfW = btnW / 2;
+        for (int i = 0; i < available.size(); i++) {
+            int col = i % GameRenderer.EDITOR_ICON_COLS;
+            int row = i / GameRenderer.EDITOR_ICON_COLS;
+            int ix  = btnX + col * halfW + (halfW - GameRenderer.EDITOR_ICON_SIZE) / 2;
+            int iy  = GameRenderer.EDITOR_OBJECT_Y + row * GameRenderer.EDITOR_ICON_ROW_H;
+            if (mx >= ix && mx <= ix + GameRenderer.EDITOR_ICON_SIZE
+                    && my >= iy && my <= iy + GameRenderer.EDITOR_ICON_SIZE) {
+                panel.editorState.setHoverTooltip("Place object: " + available.get(i)); return;
+            }
+        }
+
+        // Inside panel, no element hovered — show global help
+        panel.editorState.setHoverTooltip("1-4: Tiles | Click: Paint | R: Rotate | Ctrl+Z: Undo | Ctrl+R: Redo");
+    }
+
+    // -------------------------------------------------------------------------
+    //  Editor — tile painting (delegates to EditorActions)
+    // -------------------------------------------------------------------------
+
+    void paintTile() {
+        panel.editorActions.paintTile(
+                panel.editorState,
+                panel.getTileMap(),
+                panel.getHoveredTileX(),
+                panel.getHoveredTileY());
+        panel.repaint();
+    }
+
+    private void placeObject() {
+        panel.editorActions.placeObject(
+                panel.editorState,
+                panel.getHoveredTileX(),
+                panel.getHoveredTileY(),
+                panel.getTileMap());
+        panel.repaint();
     }
 }

@@ -28,6 +28,7 @@ public class ClientConnection {
     private static final String HOST = Constants.LOCALHOST;
     private static final int PORT = Constants.PORT;
     private static final long SEND_INTERVAL_MS = 50;
+    private static final long PING_INTERVAL_MS = 4_000;
 
     // -----------------------------------------------------------------------
     //  Socket / writer state
@@ -53,12 +54,14 @@ public class ClientConnection {
     private int  lastSentX    = Integer.MIN_VALUE;
     private int  lastSentY    = Integer.MIN_VALUE;
     private long lastSentTime = 0;
+    private long lastPingSentTime = 0;
 
     // -----------------------------------------------------------------------
     //  Update-rate tracking
     // -----------------------------------------------------------------------
 
     private volatile double updatesPerSecond = 0.0;
+    private volatile long pingMs = -1L;
     private long lastPlayersMsgMs = 0;
 
     // -----------------------------------------------------------------------
@@ -105,6 +108,8 @@ public class ClientConnection {
     private Consumer<int[][]>               inventorySlotListener;
     private Consumer<Map<String, Integer>>   equipmentListener;
     private Runnable                         stopActionListener;
+    private Consumer<String[]>               startGatheringListener;
+    private Consumer<String>                 gatherFailListener;
 
     // Quest event listeners
     private Consumer<String>           questStartListener;
@@ -191,6 +196,14 @@ public class ClientConnection {
         this.stopActionListener = listener;
     }
 
+    public void setStartGatheringListener(Consumer<String[]> listener) {
+        this.startGatheringListener = listener;
+    }
+
+    public void setGatherFailListener(Consumer<String> listener) {
+        this.gatherFailListener = listener;
+    }
+
     public void setEquipmentListener(Consumer<Map<String, Integer>> listener) {
         this.equipmentListener = listener;
     }
@@ -250,6 +263,8 @@ public class ClientConnection {
 
                 connected        = false;
                 updatesPerSecond = 0.0;
+                pingMs           = -1L;
+                lastPingSentTime = 0L;
                 remotePlayers.clear();
                 myId             = null;
                 out              = null;
@@ -347,6 +362,9 @@ public class ClientConnection {
                 l.onChat(username, role, message);
             }
 
+        } else if (line.startsWith("PONG:")) {
+            handlePong(line.substring(5).trim());
+
         // ---- Tree messages ----
         } else if (line.equals("TREES") || line.startsWith("TREES ")) {
             String payload = line.length() > 5 ? line.substring(6) : "";
@@ -420,6 +438,17 @@ public class ClientConnection {
             Shop shop = ShopParser.parse(line);
             if (shop != null && shopListener != null) {
                 shopListener.accept(shop);
+            }
+
+        } else if (line.startsWith("START_GATHERING\t")) {
+            String[] parts = line.split("\t", 3);
+            if (parts.length == 3 && startGatheringListener != null) {
+                startGatheringListener.accept(new String[]{parts[1], parts[2]});
+            }
+
+        } else if (line.startsWith("GATHER_FAIL\t")) {
+            if (gatherFailListener != null) {
+                gatherFailListener.accept(line.substring(12));
             }
 
         // ---- Skill XP ----
@@ -593,6 +622,16 @@ public class ClientConnection {
             }
         }
         lastPlayersMsgMs = now;
+    }
+
+    private void handlePong(String payload) {
+        try {
+            long sentAt = Long.parseLong(payload);
+            long rtt = System.currentTimeMillis() - sentAt;
+            if (rtt >= 0) {
+                pingMs = rtt;
+            }
+        } catch (NumberFormatException ignored) {}
     }
 
     private void parsePlayersMessage(String payload) {
@@ -814,14 +853,22 @@ public class ClientConnection {
         lastSentTime = now;
     }
 
+    public void sendPingIfDue() {
+        if (!connected || out == null) return;
+        long now = System.currentTimeMillis();
+        if (now - lastPingSentTime < PING_INTERVAL_MS) return;
+        out.println("PING:" + now);
+        lastPingSentTime = now;
+    }
+
     public void sendChop(String treeId) {
         if (!connected || out == null) return;
-        out.println("CHOP " + treeId);
+        out.println("GATHER_REQUEST\twoodcutting\t" + treeId);
     }
 
     public void sendMine(String rockId) {
         if (!connected || out == null) return;
-        out.println("MINE " + rockId);
+        out.println("GATHER_REQUEST\tmining\t" + rockId);
     }
 
     public void sendAttack(String enemyId) {
@@ -842,6 +889,11 @@ public class ClientConnection {
     public void sendTalk(String npcId) {
         if (!connected || out == null) return;
         out.println("TALK " + npcId);
+    }
+
+    public void sendClearPendingInteraction() {
+        if (!connected || out == null) return;
+        out.println("CLEAR_PENDING_INTERACTION");
     }
 
     public void sendLogin(String username, String password) {
@@ -910,6 +962,7 @@ public class ClientConnection {
     public String  getMyId()             { return myId; }
     public boolean isConnected()         { return connected; }
     public double  getUpdatesPerSecond() { return updatesPerSecond; }
+    public long    getPingMs()           { return pingMs; }
 
     // -----------------------------------------------------------------------
     //  Loot parsing

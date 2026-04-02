@@ -94,7 +94,7 @@ public class QuestJournalPanel {
         int bw = pw - 16;
 
         // ---- Header ----
-        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setFont(new Font("Arial", Font.BOLD, 10));
         drawOutlined(g, "QUEST JOURNAL", bx, CONTENT_Y + 14,
                 new Color(200, 185, 100), new Color(0, 0, 0, 160));
 
@@ -123,7 +123,7 @@ public class QuestJournalPanel {
     // -----------------------------------------------------------------------
 
     private void renderEmptyState(Graphics2D g, int px, int pw) {
-        g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+        g.setFont(new Font("Arial", Font.PLAIN, 10));
         g.setColor(new Color(85, 80, 60));
         FontMetrics fm  = g.getFontMetrics();
         String      msg = "No quests available.";
@@ -171,7 +171,7 @@ public class QuestJournalPanel {
     }
 
     private void drawSectionLabel(Graphics2D g, int bx, int y, String label) {
-        g.setFont(new Font("Monospaced", Font.BOLD, 9));
+        g.setFont(new Font("Arial", Font.BOLD, 9));
         g.setColor(new Color(150, 140, 90));
         g.drawString(label, bx, y + 9);
     }
@@ -194,7 +194,7 @@ public class QuestJournalPanel {
         g.drawOval(x + 1, y + 4, 6, 6);
 
         // Quest name — truncated if too wide
-        g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+        g.setFont(new Font("Arial", Font.PLAIN, 10));
         Color textColor = selected
                 ? new Color(255, 240, 150)
                 : (e.state == QuestState.IN_PROGRESS ? new Color(220, 205, 120) : new Color(100, 195, 100));
@@ -221,12 +221,12 @@ public class QuestJournalPanel {
         int y = DETAIL_DIVIDER_Y + 10;
 
         // Quest name (bold gold, truncated to panel width)
-        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setFont(new Font("Arial", Font.BOLD, 10));
         drawOutlined(g, truncate(g, selected.name, bw),
                 bx, y + 10, new Color(220, 200, 120), new Color(0, 0, 0, 160));
 
         // Status (coloured)
-        g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+        g.setFont(new Font("Arial", Font.PLAIN, 10));
         y += 24;
         switch (selected.state) {
             case IN_PROGRESS:
@@ -245,7 +245,7 @@ public class QuestJournalPanel {
 
         // Objective / description (word-wrapped, muted colour) — only if non-empty
         if (!selected.description.isEmpty()) {
-            g.setFont(new Font("Monospaced", Font.BOLD, 9));
+            g.setFont(new Font("Arial", Font.BOLD, 9));
             g.setColor(new Color(140, 130, 80));
             int descY = y + 26;
             String label = selected.state == QuestState.IN_PROGRESS ? "Objective:" : "Notes:";
@@ -259,7 +259,7 @@ public class QuestJournalPanel {
                 displayDesc = displayDesc + " (" + clamped + "/" + selected.requiredAmount + ")";
             }
 
-            g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+            g.setFont(new Font("Arial", Font.PLAIN, 9));
             g.setColor(new Color(170, 165, 130));
             for (String line : wordWrap(g, displayDesc, bw)) {
                 if (descY > FOOTER_Y - 8) break;
@@ -271,7 +271,7 @@ public class QuestJournalPanel {
 
     /** Centered placeholder shown when no quest is selected. */
     private void renderDetailEmpty(Graphics2D g, int px, int pw) {
-        g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+        g.setFont(new Font("Arial", Font.PLAIN, 9));
         g.setColor(new Color(90, 85, 65));
         FontMetrics fm      = g.getFontMetrics();
         String[]    lines   = { "Select a quest", "to view details." };

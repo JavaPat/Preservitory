@@ -15,10 +15,10 @@ public class CacheConfig {
 
     /** Written after a successful extract — compared on next launch to detect stale cache. */
     public static final String VERSION_FILE =
-            CACHE_DIR + "version.txt";
+            ROOT_DIR + "version.txt";
 
     public static final String CACHE_URL =
-            "https://www.dropbox.com/scl/fi/1boolpiliw69rud4gwsor/cache.zip?rlkey=3b5yyifpu61tv6ll1kcjp7mcp&st=qttkdarj&dl=1";
+            "https://www.dropbox.com/scl/fi/1boolpiliw69rud4gwsor/cache.zip?rlkey=3b5yyifpu61tv6ll1kcjp7mcp&st=dlcztsnh&dl=1";
 
     public static final String CACHE_ZIP =
             CACHE_DIR + "cache.zip";

@@ -1,5 +1,6 @@
 package com.classic.preservitory.ui.panels;
 
+import com.classic.preservitory.client.settings.ClientSettings;
 import com.classic.preservitory.entity.Player;
 import com.classic.preservitory.ui.quests.QuestEntry;
 import com.classic.preservitory.util.Constants;
@@ -54,15 +55,22 @@ public class RightPanel {
     private final SkillsTab     skillsTab     = new SkillsTab();
     private final EquipmentTab  equipmentTab  = new EquipmentTab();
     private final QuestTab      questTab      = new QuestTab();
+    private final SettingsTab   settingsTab;
+    private final KeybindingsTab keybindingsTab;
 
     /** Single dispatch map — all content-area clicks go through Tab.handleClick(). */
     private final Map<TabType, Tab> tabHandlers = new EnumMap<>(TabType.class);
-    {
+
+    public RightPanel(ClientSettings settings) {
+        settingsTab = new SettingsTab(settings);
+        keybindingsTab = new KeybindingsTab(settings);
         tabHandlers.put(TabType.COMBAT,     combatTab);
         tabHandlers.put(TabType.INVENTORY,  inventoryTab);
         tabHandlers.put(TabType.SKILLS,     skillsTab);
         tabHandlers.put(TabType.EQUIPMENT,  equipmentTab);
         tabHandlers.put(TabType.QUESTS,     questTab);
+        tabHandlers.put(TabType.SETTINGS,   settingsTab);
+        tabHandlers.put(TabType.KEYBINDINGS, keybindingsTab);
     }
 
     // -----------------------------------------------------------------------
@@ -81,31 +89,107 @@ public class RightPanel {
         equipmentTab.setUnequipListener(listener);
     }
 
+    public void setFullscreenListener(Runnable listener) {
+        settingsTab.setFullscreenListener(listener);
+    }
+
+    public void setResizableListener(Runnable listener) {
+        settingsTab.setResizableListener(listener);
+    }
+
+    public void setFpsListener(Runnable listener) {
+        settingsTab.setFpsListener(listener);
+    }
+
+    public void setPingListener(Runnable listener) {
+        settingsTab.setPingListener(listener);
+    }
+
+    public void setTotalXpListener(Runnable listener) {
+        settingsTab.setTotalXpListener(listener);
+    }
+
+    public void setKeybindingsListener(Runnable listener) {
+        settingsTab.setKeybindingsListener(listener);
+    }
+
+    public void setShiftDropListener(Runnable listener) {
+        settingsTab.setShiftDropListener(listener);
+    }
+
+    public void setKeybindingRebindListener(Consumer<ClientSettings.Action> listener) {
+        keybindingsTab.setRebindListener(listener);
+    }
+
+    public void setListeningKeybindingAction(ClientSettings.Action action) {
+        keybindingsTab.setListeningAction(action);
+    }
+
+    public void setFullscreen(boolean fullscreen) {
+        settingsTab.setFullscreen(fullscreen);
+    }
+
+    public void setResizable(boolean resizable) {
+        settingsTab.setResizable(resizable);
+    }
+
+    public void setShowFps(boolean showFps) {
+        settingsTab.setShowFps(showFps);
+    }
+
+    public void setShowPing(boolean showPing) {
+        settingsTab.setShowPing(showPing);
+    }
+
+    public boolean isInsideSettingsPanel(int sx, int sy) {
+        return tabManager.getActiveTab() == TabType.SETTINGS && settingsTab.containsPoint(sx, sy);
+    }
+
     // -----------------------------------------------------------------------
     //  Public API — input
     // -----------------------------------------------------------------------
 
-    public int getTabIndexAtScreenX(int sx) {
-        int px = Constants.PANEL_X;
+    public int getTabIndexAtScreenX(int sx, int panelX) {
         int pw = Constants.PANEL_W;
-        if (sx < px || sx >= px + pw) return -1;
+        if (sx < panelX || sx >= panelX + pw) return -1;
 
         int tabW = pw / TAB_COUNT;
-        int rel  = sx - px;
+        int rel  = sx - panelX;
         return Math.min(TAB_COUNT - 1, rel / tabW);
     }
 
-    public Rectangle getTabBounds(int index) {
-        int px    = Constants.PANEL_X;
+    public Rectangle getTabBounds(int index, int panelX) {
         int pw    = Constants.PANEL_W;
         int tabW  = pw / TAB_COUNT;
-        int slotX = px + index * tabW;
+        int slotX = panelX + index * tabW;
         int slotW = (index == TAB_COUNT - 1) ? pw - index * tabW : tabW;
         return new Rectangle(slotX, TAB_Y, slotW, TAB_H);
     }
 
     public TabType getActiveTab() {
         return tabManager.getActiveTab();
+    }
+
+    public boolean hasActiveTab() {
+        return tabManager.hasActiveTab();
+    }
+
+    public void closeActiveTab() {
+        tabManager.clearTab();
+    }
+
+    public void openTab(TabType tab) {
+        tabManager.setTab(tab);
+        if (tab == TabType.SKILLS) {
+            skillsTab.resetScroll();
+        }
+    }
+
+    public void toggleTab(TabType tab) {
+        tabManager.toggleTab(tab);
+        if (tabManager.getActiveTab() == TabType.SKILLS) {
+            skillsTab.resetScroll();
+        }
     }
 
     public int getHoveredTabIndex() {
@@ -126,10 +210,11 @@ public class RightPanel {
      * Called by GameInputHandler for content-area clicks (below the tab bar).
      * Returns true if the click was consumed.
      */
-    public boolean handleClick(int sx, int sy) {
-        int px = Constants.PANEL_X;
+    public boolean handleClick(int sx, int sy, int panelX) {
+        int px = panelX;
         int pw = Constants.PANEL_W;
         if (sx < px || sx >= px + pw) return false;
+        if (!tabManager.hasActiveTab()) return false;
 
         tabHandlers.get(tabManager.getActiveTab()).handleClick(sx, sy, px, pw);
         return true;
@@ -138,9 +223,9 @@ public class RightPanel {
     /**
      * Update hover state for the inventory grid.
      */
-    public void handleMouseMove(int sx, int sy) {
+    public void handleMouseMove(int sx, int sy, int panelX) {
         if (tabManager.getActiveTab() == TabType.INVENTORY) {
-            inventoryTab.handleMouseMove(sx, sy);
+            inventoryTab.handleMouseMove(sx, sy, panelX);
         }
     }
 
@@ -157,8 +242,8 @@ public class RightPanel {
      * Returns the itemId of the inventory slot at the given screen position,
      * or -1 if no slot is there.
      */
-    public int getClickedInventoryItemId(int sx, int sy, Player player) {
-        return inventoryTab.getClickedItemId(sx, sy, player);
+    public int getClickedInventoryItemId(int sx, int sy, Player player, int panelX) {
+        return inventoryTab.getClickedItemId(sx, sy, player, panelX);
     }
 
     public String getHoveredInventoryItemName(Player player) {
@@ -168,39 +253,56 @@ public class RightPanel {
         return inventoryTab.getHoveredItemName(player);
     }
 
+    public String getHoveredButtonLabel(int sx, int sy, int panelX) {
+        int px = panelX;
+        int pw = Constants.PANEL_W;
+        if (sx < px || sx >= px + pw) return null;
+
+        return switch (tabManager.getActiveTab()) {
+            case COMBAT -> combatTab.getHoveredButtonLabel(sx, sy, px, pw);
+            case EQUIPMENT -> equipmentTab.getHoveredButtonLabel(sx, sy);
+            case SETTINGS -> settingsTab.getHoveredButtonLabel(sy);
+            case KEYBINDINGS -> keybindingsTab.getHoveredButtonLabel(sx, sy);
+            default -> null;
+        };
+    }
+
     // -----------------------------------------------------------------------
     //  Rendering entry point
     // -----------------------------------------------------------------------
 
-    public void render(Graphics2D g, Player player,
+    public void render(Graphics2D g, int panelX, int panelH, Player player,
                        boolean shopOpen,
                        Map<Integer, Integer> sellPrices,
                        boolean isChopping, boolean isMining,
                        boolean isInCombat, String combatTarget) {
-        int px = Constants.PANEL_X;
+        int px = panelX;
         int pw = Constants.PANEL_W;
 
         // Panel background
         g.setColor(new Color(20, 16, 12));
-        g.fillRect(px, 0, pw, Constants.SCREEN_HEIGHT);
+        g.fillRect(px, 0, pw, panelH);
 
         // Inner bevelled border
         g.setColor(new Color(65, 52, 30));
         g.drawLine(px + 2, 2, px + pw - 3, 2);
-        g.drawLine(px + 2, 2, px + 2, Constants.SCREEN_HEIGHT - 3);
+        g.drawLine(px + 2, 2, px + 2, panelH - 3);
         g.setColor(new Color(30, 24, 14));
-        g.drawLine(px + pw - 3, 2, px + pw - 3, Constants.SCREEN_HEIGHT - 3);
+        g.drawLine(px + pw - 3, 2, px + pw - 3, panelH - 3);
 
         drawStatsSection(g, px, pw, player, isChopping, isMining, isInCombat, combatTarget);
-        GameRenderer.drawTabBar(g, this);
+        GameRenderer.drawTabBar(g, this, px);
         drawContentDivider(g, px, pw);
 
         switch (tabManager.getActiveTab()) {
+            case NONE:      break;
             case COMBAT:    combatTab   .render(g, px, pw);                       break;
-            case INVENTORY: inventoryTab.render(g, player, shopOpen, sellPrices); break;
+            case INVENTORY: inventoryTab.render(g, px, player, shopOpen, sellPrices); break;
             case SKILLS:    skillsTab   .render(g, player, px, pw);               break;
             case EQUIPMENT: equipmentTab.render(g, player, px, pw);               break;
             case QUESTS:    questTab    .render(g, px, pw);                       break;
+            case SETTINGS:  settingsTab .render(g, px, pw);                       break;
+            case KEYBINDINGS: keybindingsTab.render(g, px, pw);                   break;
         }
 
         drawFooter(g, px, pw);
@@ -216,7 +318,7 @@ public class RightPanel {
         int bx = px + 8;
         int bw = pw - 16;
 
-        g.setFont(new Font("Monospaced", Font.BOLD, 11));
+        g.setFont(new Font("Arial", Font.BOLD, 11));
         drawOutlined(g, "STATS", px + pw / 2 - 18, 15,
                 new Color(220, 200, 120), new Color(0, 0, 0, 180));
 
@@ -225,7 +327,7 @@ public class RightPanel {
                       : hpFrac > 0.25f ? new Color(215, 145,  25)
                       :                   new Color(195,  35,  35);
 
-        g.setFont(new Font("Monospaced", Font.PLAIN, 11));
+        g.setFont(new Font("Arial", Font.PLAIN, 11));
         g.setColor(new Color(200, 200, 200));
         g.drawString("HP:  " + player.getHp() + " / " + player.getMaxHp(), bx, 33);
 
@@ -236,7 +338,7 @@ public class RightPanel {
         g.setColor(new Color(70, 70, 70));
         g.drawRect(bx, 37, bw, 9);
 
-        g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+        g.setFont(new Font("Arial", Font.PLAIN, 10));
         String status;
         Color  statusColor;
         if (isInCombat && combatTarget != null) {
@@ -278,7 +380,7 @@ public class RightPanel {
         g.setColor(new Color(35, 28, 14));
         g.drawLine(px + 3, FOOTER_Y + 1, px + pw - 3, FOOTER_Y + 1);
 
-        g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+        g.setFont(new Font("Arial", Font.PLAIN, 9));
         g.setColor(new Color(95, 90, 65));
         g.drawString("[Enter] Chat  [D]ebug  [M]ute", bx,
                 Math.max(FOOTER_Y + 14, Constants.SCREEN_HEIGHT - 8));

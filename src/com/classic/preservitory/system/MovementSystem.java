@@ -181,14 +181,16 @@ public class MovementSystem {
     }
 
     /**
-     * Determine the dominant axis from (dx, dy) and call
-     * {@link Player#setFacing(int, int)} with a cardinal/diagonal value.
+     * Normalise (dx, dy) to unit signs and call {@link Player#setFacing(int, int)}.
+     * Using signum on both axes independently produces all 8 directions
+     * (cardinal + diagonal) without flickering or dominant-axis clamping.
+     * Direction is only updated when there is actual movement.
      */
     private void updateFacing(Player player, double dx, double dy) {
-        if (Math.abs(dx) >= Math.abs(dy)) {
-            player.setFacing(dx >= 0 ? 1 : -1, 0);
-        } else {
-            player.setFacing(0, dy >= 0 ? 1 : -1);
+        int nx = (int) Math.signum(dx);
+        int ny = (int) Math.signum(dy);
+        if (nx != 0 || ny != 0) {
+            player.setFacing(nx, ny);
         }
     }
 }

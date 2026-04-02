@@ -30,6 +30,13 @@ public abstract class UIComponent {
                 mouseY >= y && mouseY <= y + height;
     }
 
+    public void setBounds(int x, int y, int width, int height) {
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height;
+    }
+
     public boolean isVisible() { return visible; }
     public void setVisible(boolean visible) { this.visible = visible; }
 }

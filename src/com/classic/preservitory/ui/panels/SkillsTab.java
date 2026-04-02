@@ -33,7 +33,7 @@ class SkillsTab implements Tab {
     // -----------------------------------------------------------------------
 
     private static final int CONTENT_TOP    = RightPanel.CONTENT_Y;
-    private static final int CONTENT_BOTTOM = GamePanel.LOGOUT_BTN_Y - 6;
+    private static final int CONTENT_BOTTOM = Constants.SCREEN_HEIGHT - GamePanel.LOGOUT_BTN_H - 2 - 6;
     private static final int CONTENT_H      = CONTENT_BOTTOM - CONTENT_TOP;
     private static final int SCROLL_STEP = 20;
 
@@ -73,7 +73,7 @@ class SkillsTab implements Tab {
         int y  = CONTENT_TOP + 10;
         List<Skill> skills = getOrderedSkills(player);
 
-        contentG.setFont(new Font("Monospaced", Font.BOLD, 10));
+        contentG.setFont(new Font("Arial", Font.BOLD, 10));
         drawOutlined(contentG, "SKILLS", px + pw / 2 - 16, y + 2,
                 new Color(200, 185, 100), new Color(0, 0, 0, 160));
         y += 14;
@@ -96,18 +96,18 @@ class SkillsTab implements Tab {
     // -----------------------------------------------------------------------
 
     private int drawSkillRow(Graphics2D g, int x, int y, int bw, Skill skill) {
-        g.setFont(new Font("Monospaced", Font.BOLD, 10));
+        g.setFont(new Font("Arial", Font.BOLD, 10));
         g.setColor(new Color(195, 185, 125));
         g.drawString(skill.getName().toUpperCase(), x, y + 11);
 
-        g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+        g.setFont(new Font("Arial", Font.PLAIN, 10));
         g.setColor(Color.WHITE);
         String lvl = "Lv " + skill.getLevel();
         FontMetrics fm = g.getFontMetrics();
         g.drawString(lvl, x + bw - fm.stringWidth(lvl), y + 11);
         y += 14;
 
-        g.setFont(new Font("Monospaced", Font.PLAIN, 9));
+        g.setFont(new Font("Arial", Font.PLAIN, 9));
         g.setColor(new Color(130, 125, 90));
         int xpInLevel   = skill.getXp() - skill.xpForCurrentLevel();
         int xpThisLevel = skill.xpForNextLevel() - skill.xpForCurrentLevel();
