@@ -18,16 +18,22 @@ public final class ItemDefinition {
     public final String  equipSlot;
     public final int     attackBonus;
     public final int     strengthBonus;
+    public final int     defenceBonus;
+    /** AssetManager key for the item's sprite, or {@code null} if none loaded. */
+    public final String  spriteKey;
+    /** True if this item can be buried for Prayer XP. */
+    public final boolean buryable;
 
     /** Sentinel id used by {@link #UNKNOWN} — never a valid loaded id. */
     public static final int INVALID_ID = -1;
 
     /** Returned for any unrecognised item ID. */
     public static final ItemDefinition UNKNOWN =
-            new ItemDefinition(INVALID_ID, "Unknown", 0, false, false, null, 0, 0);
+            new ItemDefinition(INVALID_ID, "Unknown", 0, false, false, null, 0, 0, 0, null, false);
 
     public ItemDefinition(int id, String name, int value, boolean stackable, boolean tradable,
-                          String equipSlot, int attackBonus, int strengthBonus) {
+                          String equipSlot, int attackBonus, int strengthBonus, int defenceBonus,
+                          String spriteKey, boolean buryable) {
         this.id            = id;
         this.name          = name;
         this.value         = value;
@@ -36,9 +42,12 @@ public final class ItemDefinition {
         this.equipSlot     = equipSlot;
         this.attackBonus   = attackBonus;
         this.strengthBonus = strengthBonus;
+        this.defenceBonus  = defenceBonus;
+        this.spriteKey     = spriteKey;
+        this.buryable      = buryable;
     }
 
     public ItemDefinition(int id, String name, int value, boolean stackable, boolean tradable) {
-        this(id, name, value, stackable, tradable, null, 0, 0);
+        this(id, name, value, stackable, tradable, null, 0, 0, 0, null, false);
     }
 }

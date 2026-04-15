@@ -1,0 +1,9 @@
+{
+  "id": "prayer_altar",
+  "category": "altar",
+  "width": 64,
+  "height": 64,
+  "blocksMovement": true,
+  "spriteKey": "objects/prayer/prayer_altar",
+  "respawnMs": 0
+}

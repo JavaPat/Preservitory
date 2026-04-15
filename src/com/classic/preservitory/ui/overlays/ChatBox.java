@@ -1,9 +1,12 @@
 package com.classic.preservitory.ui.overlays;
 
+import com.classic.preservitory.ui.framework.assets.AssetManager;
+
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -161,20 +164,25 @@ public class ChatBox {
     public void render(Graphics2D g, int x, int y, int w, int h, String typingInput) {
         boolean typing = (typingInput != null);
 
-        // ---- Background ----
-        g.setColor(new Color(8, 6, 4, 185));
-        g.fillRect(x, y, w, h);
+        // ---- Background — sprite if available, else solid fill fallback ----
+        BufferedImage bgSprite = AssetManager.getImage("chat_box");
+        if (bgSprite != null) {
+            g.drawImage(bgSprite, x, y, w, h, null);
+        } else {
+            g.setColor(new Color(8, 6, 4, 185));
+            g.fillRect(x, y, w, h);
 
-        // ---- Top border — two-tone gold line (RuneScape style) ----
-        g.setColor(new Color(150, 125, 45));
-        g.drawLine(x, y, x + w - 1, y);
-        g.setColor(new Color(80, 65, 20));
-        g.drawLine(x, y + 1, x + w - 1, y + 1);
+            // Top border — two-tone gold line (RuneScape style)
+            g.setColor(new Color(150, 125, 45));
+            g.drawLine(x, y, x + w - 1, y);
+            g.setColor(new Color(80, 65, 20));
+            g.drawLine(x, y + 1, x + w - 1, y + 1);
 
-        // ---- Left / right thin borders ----
-        g.setColor(new Color(60, 50, 20));
-        g.drawLine(x,         y, x,         y + h - 1);
-        g.drawLine(x + w - 1, y, x + w - 1, y + h - 1);
+            // Left / right thin borders
+            g.setColor(new Color(60, 50, 20));
+            g.drawLine(x,         y, x,         y + h - 1);
+            g.drawLine(x + w - 1, y, x + w - 1, y + h - 1);
+        }
 
         // ---- Compute message area (shrink if input bar is visible) ----
         int msgAreaH = typing ? h - INPUT_BAR_H : h;

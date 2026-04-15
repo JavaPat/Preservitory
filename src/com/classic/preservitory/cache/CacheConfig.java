@@ -18,7 +18,7 @@ public class CacheConfig {
             ROOT_DIR + "version.txt";
 
     public static final String CACHE_URL =
-            "https://www.dropbox.com/scl/fi/1boolpiliw69rud4gwsor/cache.zip?rlkey=3b5yyifpu61tv6ll1kcjp7mcp&st=dlcztsnh&dl=1";
+            "https://www.dropbox.com/scl/fi/1boolpiliw69rud4gwsor/cache.zip?rlkey=3b5yyifpu61tv6ll1kcjp7mcp&st=9cdyzgcn&dl=1";
 
     public static final String CACHE_ZIP =
             CACHE_DIR + "cache.zip";

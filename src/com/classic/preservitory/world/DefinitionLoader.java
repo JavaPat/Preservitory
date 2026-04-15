@@ -30,6 +30,7 @@ public final class DefinitionLoader {
     private static final Pattern W_PATTERN   = Pattern.compile("\"width\"\\s*:\\s*(\\d+)");
     private static final Pattern H_PATTERN   = Pattern.compile("\"height\"\\s*:\\s*(\\d+)");
     private static final Pattern BM_PATTERN  = Pattern.compile("\"blocksMovement\"\\s*:\\s*(true|false)");
+    private static final Pattern SK_PATTERN  = Pattern.compile("\"spriteKey\"\\s*:\\s*\"([^\"]+)\"");
 
     private DefinitionLoader() {}
 
@@ -77,8 +78,9 @@ public final class DefinitionLoader {
         int     width          = wStr  != null ? Integer.parseInt(wStr)  : Constants.TILE_SIZE;
         int     height         = hStr  != null ? Integer.parseInt(hStr)  : Constants.TILE_SIZE;
         boolean blocksMovement = "true".equals(bmStr);
+        String  spriteKey      = match(json, SK_PATTERN);
 
-        return new ObjectDefinition(id, width, height, blocksMovement);
+        return new ObjectDefinition(id, width, height, blocksMovement, spriteKey);
     }
 
     private static String match(String text, Pattern p) {

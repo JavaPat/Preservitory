@@ -49,6 +49,8 @@ public final class ClientSettings {
     private boolean showPing;
     private boolean showTotalXp;
     private boolean shiftClickDrop;
+    private boolean showMinimap;
+    private boolean showDirectionIndicator;
     private final EnumMap<Action, Integer> keyBindings = new EnumMap<>(Action.class);
 
     private ClientSettings() {}
@@ -70,6 +72,8 @@ public final class ClientSettings {
             settings.showPing = root.optBoolean("showPing", false);
             settings.showTotalXp = root.optBoolean("showTotalXp", true);
             settings.shiftClickDrop = root.optBoolean("shiftClickDrop", false);
+            settings.showMinimap = root.optBoolean("showMinimap", false);
+            settings.showDirectionIndicator = root.optBoolean("showDirectionIndicator", false);
 
             JSONObject keyBindingsJson = root.optJSONObject("keyBindings");
             if (keyBindingsJson != null) {
@@ -113,6 +117,8 @@ public final class ClientSettings {
             root.put("showPing", showPing);
             root.put("showTotalXp", showTotalXp);
             root.put("shiftClickDrop", shiftClickDrop);
+            root.put("showMinimap", showMinimap);
+            root.put("showDirectionIndicator", showDirectionIndicator);
 
             JSONObject keyBindingsJson = new JSONObject();
             for (Map.Entry<Action, Integer> entry : keyBindings.entrySet()) {
@@ -156,6 +162,22 @@ public final class ClientSettings {
 
     public void setShiftClickDrop(boolean shiftClickDrop) {
         this.shiftClickDrop = shiftClickDrop;
+    }
+
+    public boolean isShowMinimap() {
+        return showMinimap;
+    }
+
+    public void setShowMinimap(boolean showMinimap) {
+        this.showMinimap = showMinimap;
+    }
+
+    public boolean isShowDirectionIndicator() {
+        return showDirectionIndicator;
+    }
+
+    public void setShowDirectionIndicator(boolean showDirectionIndicator) {
+        this.showDirectionIndicator = showDirectionIndicator;
     }
 
     public int getKeyBinding(Action action) {

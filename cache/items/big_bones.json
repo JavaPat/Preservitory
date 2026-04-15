@@ -1,0 +1,9 @@
+{
+  "id": 401,
+  "name": "Big Bones",
+  "value": 15,
+  "stackable": false,
+  "tradable": true,
+  "buryable": true,
+  "spriteKey": "items/prayer/big_bones"
+}

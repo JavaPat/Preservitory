@@ -1,12 +1,14 @@
 package com.classic.preservitory.ui.panels;
 
+import com.classic.preservitory.client.definitions.ItemDefinitionManager;
 import com.classic.preservitory.client.definitions.ItemIds;
 import com.classic.preservitory.entity.Player;
 import com.classic.preservitory.item.Item;
+import com.classic.preservitory.ui.framework.TabRenderer;
 import com.classic.preservitory.ui.framework.assets.AssetManager;
-import com.classic.preservitory.util.Constants;
 
 import java.awt.*;
+import java.awt.image.BufferedImage;
 import java.util.List;
 import java.util.Map;
 
@@ -16,43 +18,50 @@ import java.util.Map;
  * Display only — reads Player inventory data, never modifies it.
  * Equip / sell actions are routed through RightPanel and GameInputHandler.
  */
-class InventoryTab implements Tab {
+public class InventoryTab implements TabRenderer {
 
-    // -----------------------------------------------------------------------
-    //  Layout (mirrors RightPanel layout constants)
-    // -----------------------------------------------------------------------
+    // Grid geometry — single source of truth for slot size and grid dimensions
+    public static final int INV_COLS  = 4;
+    public static final int INV_ROWS  = 7;
+    public static final int SLOT_SIZE = 44;
+    public static final int SLOT_GAP  = 3;
+    static final        int SLOT_STEP = SLOT_SIZE + SLOT_GAP;
 
-    private static final int CONTENT_Y = 110;
-    private static final int FOOTER_Y  = 520;
+    // State set before render
+    private Player                  player     = null;
+    private boolean                 shopOpen   = false;
+    private Map<Integer, Integer>   sellPrices = null;
 
-    // -----------------------------------------------------------------------
-    //  Grid geometry
-    // -----------------------------------------------------------------------
-
-    private static final int INV_COLS  = 4;
-    private static final int INV_ROWS  = 7;
-    private static final int SLOT_SIZE = 44;
-    private static final int SLOT_GAP  = 3;
-    private static final int SLOT_STEP = SLOT_SIZE + SLOT_GAP;  // 47 px per slot
-
-    // -----------------------------------------------------------------------
-    //  State
-    // -----------------------------------------------------------------------
-
+    // Hover state
     private int hoverSlot = -1;
 
+    // Bounds cached from last render — used by external callers
+    private int lastX, lastY, lastWidth, lastHeight;
+
     // -----------------------------------------------------------------------
-    //  Input
+    //  Context setters (called by RightPanel before each render)
     // -----------------------------------------------------------------------
 
-    /** Update the hovered slot index from the current mouse position. */
-    void handleMouseMove(int sx, int sy, int panelX) {
+    void setPlayer(Player p) { this.player = p; }
+
+    void setShopState(boolean shopOpen, Map<Integer, Integer> sellPrices) {
+        this.shopOpen   = shopOpen;
+        this.sellPrices = sellPrices;
+    }
+
+    // -----------------------------------------------------------------------
+    //  TabRenderer — input
+    // -----------------------------------------------------------------------
+
+    @Override
+    public void handleMouseMove(int sx, int sy, int x, int y, int width, int height) {
+        lastX = x; lastY = y; lastWidth = width; lastHeight = height;
         hoverSlot = -1;
-        if (sy < CONTENT_Y || sy >= FOOTER_Y) return;
-        if (sx < panelX) return;
+        if (sy < y || sy >= y + height) return;
+        if (sx < x) return;
 
-        int gridX = panelX + (Constants.PANEL_W - INV_COLS * SLOT_STEP) / 2;
-        int gridY = CONTENT_Y + 30;
+        int gridX = x + (width - INV_COLS * SLOT_STEP) / 2;
+        int gridY = y + 30;
 
         for (int row = 0; row < INV_ROWS; row++) {
             for (int col = 0; col < INV_COLS; col++) {
@@ -67,20 +76,57 @@ class InventoryTab implements Tab {
         }
     }
 
-    /**
-     * Returns the itemId of the slot at (sx, sy), or -1 if no slot is there.
-     * Called by RightPanel to support equip / shop-sell clicks.
-     */
-    int getClickedItemId(int sx, int sy, Player player, int panelX) {
-        if (sx < panelX || sy < CONTENT_Y || sy >= FOOTER_Y) return -1;
+    @Override
+    public void render(Graphics2D g, int x, int y, int width, int height) {
+        lastX = x; lastY = y; lastWidth = width; lastHeight = height;
+        if (player == null) return;
 
-        int gridX = panelX + (Constants.PANEL_W - INV_COLS * SLOT_STEP) / 2;
-        int gridY = CONTENT_Y + 30;
+        int bx = x + 8;
+        int contentStartY = y + 6;
+
+        int invCount = player.getInventory().getSlotCount();
+        g.setFont(new Font("Arial", Font.BOLD, 10));
+        drawOutlined(g, "INVENTORY   " + invCount + " / 28",
+                bx, contentStartY + 12,
+                new Color(200, 185, 100), new Color(0, 0, 0, 160));
+
+        int gridX = x + (width - INV_COLS * SLOT_STEP) / 2;
+        int gridY = contentStartY + 24;
         List<Item> slots = player.getInventory().getSlots();
 
         for (int row = 0; row < INV_ROWS; row++) {
             for (int col = 0; col < INV_COLS; col++) {
-                int idx = row * INV_COLS + col;
+                int idx       = row * INV_COLS + col;
+                int slotX     = gridX + col * SLOT_STEP;
+                int slotY     = gridY + row * SLOT_STEP;
+                Item item     = idx < slots.size() ? slots.get(idx) : null;
+                boolean hov   = (idx == hoverSlot);
+                Integer price = (shopOpen && item != null && sellPrices != null)
+                        ? sellPrices.get(item.getItemId()) : null;
+                drawSlot(g, slotX, slotY, SLOT_SIZE, item, hov, false, price);
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    //  Package-private helpers called from RightPanel / GameInputHandler
+    // -----------------------------------------------------------------------
+
+    /**
+     * Returns the itemId of the slot at (sx, sy), or -1 if none.
+     * Uses stored bounds from the last render call.
+     */
+    int getClickedItemId(int sx, int sy, Player player, int panelX) {
+        if (lastHeight == 0) return -1;
+        if (sx < lastX || sy < lastY || sy >= lastY + lastHeight) return -1;
+
+        int gridX = lastX + (lastWidth - INV_COLS * SLOT_STEP) / 2;
+        int gridY = lastY + 30;
+        List<Item> slots = player.getInventory().getSlots();
+
+        for (int row = 0; row < INV_ROWS; row++) {
+            for (int col = 0; col < INV_COLS; col++) {
+                int idx   = row * INV_COLS + col;
                 if (idx >= slots.size()) return -1;
                 int slotX = gridX + col * SLOT_STEP;
                 int slotY = gridY + row * SLOT_STEP;
@@ -96,115 +142,89 @@ class InventoryTab implements Tab {
 
     String getHoveredItemName(Player player) {
         List<Item> slots = player.getInventory().getSlots();
-        if (hoverSlot < 0 || hoverSlot >= slots.size()) {
-            return null;
-        }
+        if (hoverSlot < 0 || hoverSlot >= slots.size()) return null;
         Item item = slots.get(hoverSlot);
         return item != null ? item.getName() : null;
-    }
-
-    // -----------------------------------------------------------------------
-    //  Rendering
-    // -----------------------------------------------------------------------
-
-    void render(Graphics2D g, int panelX, Player player, boolean shopOpen, Map<Integer, Integer> sellPrices) {
-        int px = panelX;
-        int pw = Constants.PANEL_W;
-        int bx = px + 8;
-        int contentStartY = CONTENT_Y + 6;
-
-        // Header
-        int invCount = player.getInventory().getSlotCount();
-        g.setFont(new Font("Arial", Font.BOLD, 10));
-        drawOutlined(g, "INVENTORY   " + invCount + " / 28",
-                bx, contentStartY + 12,
-                new Color(200, 185, 100), new Color(0, 0, 0, 160));
-        if (shopOpen) {
-            g.setFont(new Font("Arial", Font.PLAIN, 9));
-            g.setColor(new Color(120, 180, 120));
-            //g.drawString("Click an item to sell", bx, contentStartY + 24);
-        }
-
-        // Grid
-        int gridX = px + (pw - INV_COLS * SLOT_STEP) / 2;
-        int gridY = contentStartY + 24;
-        List<Item> slots = player.getInventory().getSlots();
-
-        for (int row = 0; row < INV_ROWS; row++) {
-            for (int col = 0; col < INV_COLS; col++) {
-                int idx       = row * INV_COLS + col;
-                int slotX     = gridX + col * SLOT_STEP;
-                int slotY     = gridY + row * SLOT_STEP;
-                Item item     = idx < slots.size() ? slots.get(idx) : null;
-                boolean hov   = (idx == hoverSlot);
-                Integer price = (shopOpen && item != null && sellPrices != null)
-                        ? sellPrices.get(item.getItemId()) : null;
-                drawSlot(g, slotX, slotY, item, hov, price);
-            }
-        }
-
     }
 
     // -----------------------------------------------------------------------
     //  Private draw helpers
     // -----------------------------------------------------------------------
 
-    private void drawSlot(Graphics2D g, int x, int y, Item item, boolean hovered, Integer sellPrice) {
-        // Background
+    public static void drawSlot(Graphics2D g, int x, int y, int slotSize,
+                                Item item, boolean hovered, boolean selected, Integer sellPrice) {
         Color bg = hovered
-                ? (item != null ? new Color(90, 75, 38, 230) : new Color(60, 50, 28, 220))
-                : (item != null ? new Color(45, 38, 22, 220) : new Color(22, 18, 12, 210));
+                ? (item != null ? new Color(74, 58, 30, 232) : new Color(52, 40, 22, 224))
+                : (item != null ? new Color(36, 28, 16, 224) : new Color(24, 18, 12, 214));
         g.setColor(bg);
-        g.fillRect(x, y, SLOT_SIZE, SLOT_SIZE);
+        g.fillRoundRect(x, y, slotSize, slotSize, 4, 4);
 
-        // Outer border
-        g.setColor(hovered ? new Color(210, 180, 70, 240) : new Color(72, 60, 30, 200));
-        g.drawRect(x, y, SLOT_SIZE, SLOT_SIZE);
+        g.setColor(new Color(18, 12, 8, 180));
+        g.drawRoundRect(x, y, slotSize, slotSize, 4, 4);
 
-        // Inner bevel
-        g.setColor(hovered ? new Color(255, 225, 100, 80) : new Color(38, 32, 16, 140));
-        g.drawRect(x + 1, y + 1, SLOT_SIZE - 2, SLOT_SIZE - 2);
+        g.setColor(hovered ? new Color(126, 96, 48, 140) : new Color(84, 62, 34, 110));
+        g.drawRoundRect(x + 1, y + 1, slotSize - 2, slotSize - 2, 3, 3);
+        g.setColor(new Color(132, 104, 60, 55));
+        g.drawLine(x + 3, y + 2, x + slotSize - 4, y + 2);
+        g.drawLine(x + 2, y + 3, x + 2, y + slotSize - 4);
+        g.setColor(new Color(6, 4, 2, 145));
+        g.drawLine(x + 3, y + slotSize - 2, x + slotSize - 3, y + slotSize - 2);
+        g.drawLine(x + slotSize - 2, y + 3, x + slotSize - 2, y + slotSize - 3);
+
+        if (selected) {
+            g.setColor(new Color(255, 208, 72, 240));
+            g.drawRoundRect(x - 1, y - 1, slotSize + 2, slotSize + 2, 5, 5);
+            g.setColor(new Color(88, 62, 28, 200));
+            g.drawRoundRect(x + 1, y + 1, slotSize - 2, slotSize - 2, 3, 3);
+        }
 
         if (item == null) return;
 
         if (item.getItemId() == ItemIds.COINS) {
-            // OSRS-style coin stack sprite + formatted amount text.
             AssetManager.drawCoinStack(g, item.getCount(), x, y, true);
         } else {
-            // Item icon — rounded coloured rectangle
-            Color ic  = iconColorFor(item.getName());
-            int   pad = 7;
-            int   iw  = SLOT_SIZE - pad * 2;
-            int   ih  = SLOT_SIZE - pad * 2 - 4;
-            g.setColor(ic);
-            g.fillRoundRect(x + pad, y + pad, iw, ih, 5, 5);
-            g.setColor(ic.brighter().brighter());
-            g.drawLine(x + pad + 2, y + pad + 2, x + pad + iw / 3, y + pad + 2);
-            g.setColor(ic.darker().darker());
-            g.drawRoundRect(x + pad, y + pad, iw, ih, 5, 5);
+            String spriteKey = ItemDefinitionManager.get(item.getItemId()).spriteKey;
+            BufferedImage sprite = spriteKey != null ? AssetManager.getImage(spriteKey) : null;
+            int pad = Math.max(4, slotSize / 7);
+            int iSize = slotSize - pad * 2;
+            if (sprite != null) {
+                g.drawImage(sprite, x + pad, y + pad, iSize, iSize, null);
+            } else {
+                Color ic = iconColorFor(item.getName());
+                int ih = iSize - 4;
+                g.setColor(ic);
+                g.fillRoundRect(x + pad, y + pad, iSize, ih, 5, 5);
+                g.setColor(ic.brighter().brighter());
+                g.drawLine(x + pad + 2, y + pad + 2, x + pad + iSize / 3, y + pad + 2);
+                g.setColor(ic.darker().darker());
+                g.drawRoundRect(x + pad, y + pad, iSize, ih, 5, 5);
+            }
 
-            // Stack count
             if (item.isStackable() && item.getCount() > 1) {
                 String cnt = item.getCount() >= 1000 ? (item.getCount() / 1000) + "k"
                            : String.valueOf(item.getCount());
                 g.setFont(new Font("Arial", Font.BOLD, 9));
+                FontMetrics fm = g.getFontMetrics();
+                int textX = x + slotSize - fm.stringWidth(cnt) - 3;
+                int textY = y + slotSize - 3;
                 g.setColor(new Color(0, 0, 0, 210));
-                g.drawString(cnt, x + 3 + 1, y + SLOT_SIZE - 3 + 1);
-                g.setColor(new Color(255, 230, 0));
-                g.drawString(cnt, x + 3, y + SLOT_SIZE - 3);
+                g.drawString(cnt, textX + 1, textY + 1);
+                g.drawString(cnt, textX + 1, textY);
+                g.setColor(Color.WHITE);
+                g.drawString(cnt, textX, textY);
             }
         }
 
-        // Sell price overlay
         if (sellPrice != null) {
             String price = sellPrice + "c";
             g.setFont(new Font("Arial", Font.BOLD, 8));
             FontMetrics fm = g.getFontMetrics();
             g.setColor(new Color(0, 0, 0, 180));
-            g.drawString(price, x + SLOT_SIZE - fm.stringWidth(price) - 3 + 1, y + 10 + 1);
+            g.drawString(price, x + slotSize - fm.stringWidth(price) - 3 + 1, y + 10 + 1);
             g.setColor(new Color(140, 220, 140));
-            g.drawString(price, x + SLOT_SIZE - fm.stringWidth(price) - 3, y + 10);
+            g.drawString(price, x + slotSize - fm.stringWidth(price) - 3, y + 10);
         }
+
     }
 
     private static Color iconColorFor(String name) {
@@ -220,7 +240,7 @@ class InventoryTab implements Tab {
         }
     }
 
-    private static void drawOutlined(Graphics2D g, String text, int x, int y, Color fg, Color shadow) {
+    public static void drawOutlined(Graphics2D g, String text, int x, int y, Color fg, Color shadow) {
         g.setColor(shadow);
         g.drawString(text, x + 1, y + 1);
         g.drawString(text, x - 1, y + 1);

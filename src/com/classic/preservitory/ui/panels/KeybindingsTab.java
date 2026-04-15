@@ -1,6 +1,7 @@
 package com.classic.preservitory.ui.panels;
 
 import com.classic.preservitory.client.settings.ClientSettings;
+import com.classic.preservitory.ui.framework.TabRenderer;
 
 import java.awt.*;
 import java.awt.event.KeyEvent;
@@ -8,10 +9,9 @@ import java.util.EnumMap;
 import java.util.Map;
 import java.util.function.Consumer;
 
-class KeybindingsTab implements Tab {
+class KeybindingsTab implements TabRenderer {
 
-    private static final int CONTENT_Y = RightPanel.CONTENT_Y;
-    private static final int ROW_H = 24;
+    private static final int ROW_H   = 24;
     private static final int ROW_GAP = 8;
 
     private final ClientSettings settings;
@@ -32,7 +32,7 @@ class KeybindingsTab implements Tab {
     }
 
     @Override
-    public void handleClick(int sx, int sy, int px, int pw) {
+    public void handleClick(int sx, int sy, int x, int y, int width, int height) {
         for (Map.Entry<ClientSettings.Action, Rectangle> entry : rowBounds.entrySet()) {
             if (entry.getValue().contains(sx, sy) && rebindListener != null) {
                 rebindListener.accept(entry.getKey());
@@ -41,18 +41,29 @@ class KeybindingsTab implements Tab {
         }
     }
 
-    void render(Graphics2D g, int px, int pw) {
-        int x = px + 8;
-        int bw = pw - 16;
-        int y = CONTENT_Y + 10;
+    @Override
+    public String getHoveredLabel(int sx, int sy, int x, int y, int width, int height) {
+        for (Map.Entry<ClientSettings.Action, Rectangle> entry : rowBounds.entrySet()) {
+            if (entry.getValue().contains(sx, sy)) {
+                return "Rebind " + entry.getKey().getLabel();
+            }
+        }
+        return null;
+    }
+
+    @Override
+    public void render(Graphics2D g, int x, int y, int width, int height) {
+        int bx = x + 8;
+        int bw = width - 16;
+        int cy = y + 10;
 
         g.setFont(new Font("Arial", Font.BOLD, 10));
-        drawOutlined(g, "KEYBINDINGS", px + pw / 2 - 30, y + 2,
+        drawOutlined(g, "KEYBINDINGS", x + width / 2 - 30, cy + 2,
                 new Color(200, 185, 100), new Color(0, 0, 0, 160));
-        y += 22;
+        cy += 22;
 
         for (ClientSettings.Action action : ClientSettings.Action.values()) {
-            Rectangle bounds = new Rectangle(x, y, bw, ROW_H);
+            Rectangle bounds = new Rectangle(bx, cy, bw, ROW_H);
             rowBounds.put(action, bounds);
 
             boolean listening = action == listeningAction;
@@ -63,26 +74,17 @@ class KeybindingsTab implements Tab {
 
             g.setFont(new Font("Arial", Font.PLAIN, 10));
             g.setColor(new Color(220, 210, 150));
-            g.drawString(action.getLabel(), x + 8, y + 15);
+            g.drawString(action.getLabel(), bx + 8, cy + 15);
 
             String value = listening
                     ? "Press a key..."
                     : KeyEvent.getKeyText(settings.getKeyBinding(action));
             FontMetrics fm = g.getFontMetrics();
             g.setColor(listening ? new Color(255, 225, 140) : new Color(180, 170, 120));
-            g.drawString(value, x + bw - fm.stringWidth(value) - 8, y + 15);
+            g.drawString(value, bx + bw - fm.stringWidth(value) - 8, cy + 15);
 
-            y += ROW_H + ROW_GAP;
+            cy += ROW_H + ROW_GAP;
         }
-    }
-
-    String getHoveredButtonLabel(int sx, int sy) {
-        for (Map.Entry<ClientSettings.Action, Rectangle> entry : rowBounds.entrySet()) {
-            if (entry.getValue().contains(sx, sy)) {
-                return "Rebind " + entry.getKey().getLabel();
-            }
-        }
-        return null;
     }
 
     private static void drawOutlined(Graphics2D g, String text, int x, int y,

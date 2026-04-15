@@ -13,8 +13,11 @@ import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The player character.
@@ -34,6 +37,9 @@ import java.util.Map;
  */
 public class Player extends Entity {
 
+    /** Set true temporarily to render the direction string above the player head. */
+    public static boolean DEBUG_DIRECTION = false;
+
     // -----------------------------------------------------------------------
     //  Network identity — assigned by the server on connect
     // -----------------------------------------------------------------------
@@ -47,15 +53,14 @@ public class Player extends Entity {
 
     private double speed;
 
+    /** Server-authoritative moving flag — true while the server is stepping the player. */
+    private volatile boolean serverMoving = false;
+
     // -----------------------------------------------------------------------
-    //  Facing direction (updated by MovementSystem)
+    //  Facing direction — authoritative from server, never derived on client
     // -----------------------------------------------------------------------
 
-    /** Last horizontal movement direction: -1 = left, 0 = none, +1 = right. */
-    private int facingX = 0;
-
-    /** Last vertical movement direction:   -1 = up,   0 = none, +1 = down. */
-    private int facingY = 1;   // default: facing south
+    private String direction = "south";
 
     // -----------------------------------------------------------------------
     //  Inventory & skills
@@ -107,22 +112,52 @@ public class Player extends Entity {
     // -----------------------------------------------------------------------
 
     /**
-     * Update the player's facing direction.
-     * Only applies the change when at least one component is non-zero, so the
-     * facing direction is retained when the player stops moving.
+     * Set the server-authoritative direction string.
+     * Only valid values are "north", "south", "east", "west".
      */
-    public void setFacing(int fx, int fy) {
-        if (fx != 0 || fy != 0) {
-            facingX = fx;
-            facingY = fy;
+    public void setDirection(String dir) {
+        if (dir != null && !dir.isBlank()) {
+            this.direction = dir.trim().toLowerCase();
         }
     }
 
-    /** Immediately face towards the given entity. */
+    /** Returns the current facing direction as sent by the server. */
+    public String getDirection() {
+        return direction;
+    }
+
+    /**
+     * Face toward the given entity using axis-priority (X first).
+     * Used by combat; converts to a 4-cardinal direction string.
+     */
     public void faceTarget(com.classic.preservitory.entity.Entity target) {
-        int nx = (int) Math.signum(target.getCenterX() - getCenterX());
-        int ny = (int) Math.signum(target.getCenterY() - getCenterY());
-        setFacing(nx, ny);
+        double dx = target.getCenterX() - getCenterX();
+        double dy = target.getCenterY() - getCenterY();
+        if (Math.abs(dx) >= Math.abs(dy)) {
+            direction = dx > 0 ? "east" : "west";
+        } else {
+            direction = dy > 0 ? "south" : "north";
+        }
+    }
+
+    /**
+     * Integer accessors kept for compatibility with legacy rendering code
+     * (the dot position in {@link #renderLegacyBody}).
+     */
+    public int getFacingX() {
+        return switch (direction) {
+            case "east"  ->  1;
+            case "west"  -> -1;
+            default      ->  0;
+        };
+    }
+
+    public int getFacingY() {
+        return switch (direction) {
+            case "south" ->  1;
+            case "north" -> -1;
+            default      ->  0;
+        };
     }
 
     // -----------------------------------------------------------------------
@@ -267,6 +302,14 @@ public class Player extends Entity {
             renderLegacyBody(g2, footX, spriteFootY, state);
         }
 
+        // ---- DEBUG: direction label above head (set to true to diagnose sprite mapping) ----
+        if (DEBUG_DIRECTION) {
+            String dbgDir = getSpriteDirection().toUpperCase();
+            g2.setFont(new java.awt.Font("Arial", java.awt.Font.BOLD, 10));
+            g2.setColor(java.awt.Color.YELLOW);
+            g2.drawString(dbgDir, footX - g2.getFontMetrics().stringWidth(dbgDir) / 2, spriteFootY - 40);
+        }
+
         // ---- Tool flash (right side of body) ----
         if (state == Animation.State.CHOPPING) {
             double phase = animation.sin(5);
@@ -326,13 +369,15 @@ public class Player extends Entity {
 
         int dotX;
         int dotY;
-        if (facingX > 0) {
+        int fx = getFacingX();
+        int fy = getFacingY();
+        if (fx > 0) {
             dotX = bodyX + bodyW - 5;
             dotY = bodyY + bodyH / 2 - 3;
-        } else if (facingX < 0) {
+        } else if (fx < 0) {
             dotX = bodyX + 1;
             dotY = bodyY + bodyH / 2 - 3;
-        } else if (facingY < 0) {
+        } else if (fy < 0) {
             dotX = bodyX + bodyW / 2 - 3;
             dotY = bodyY + 1;
         } else {
@@ -344,15 +389,14 @@ public class Player extends Entity {
         g2.fillOval(dotX, dotY, 6, 6);
     }
 
+    /**
+     * Returns the direction string for sprite selection.
+     * The server is the sole authority; no derivation happens here.
+     * If sprites appear visually flipped for a direction, swap the string
+     * returned for that case (e.g. return "west" when direction is "east").
+     */
     private String getSpriteDirection() {
-        if (facingX > 0 && facingY < 0) return "north-east";
-        if (facingX > 0 && facingY > 0) return "south-east";
-        if (facingX < 0 && facingY < 0) return "north-west";
-        if (facingX < 0 && facingY > 0) return "south-west";
-        if (facingX > 0) return "east";
-        if (facingX < 0) return "west";
-        if (facingY < 0) return "north";
-        return "south";
+        return direction;
     }
 
     // -----------------------------------------------------------------------
@@ -362,16 +406,16 @@ public class Player extends Entity {
     public String      getId()            { return id; }
     public void        setId(String id)   { this.id = id; }
 
-    public double      getSpeed()         { return speed; }
-    public void        setSpeed(double s) { this.speed = s; }
+    public double      getSpeed()               { return speed; }
+    public void        setSpeed(double s)       { this.speed = s; }
+
+    public boolean     isServerMoving()         { return serverMoving; }
+    public void        setServerMoving(boolean m) { this.serverMoving = m; }
 
     public Inventory   getInventory()     { return inventory; }
     public Map<String, Integer> getInventoryState() { return inventoryState; }
     public SkillSystem getSkillSystem()   { return skillSystem; }
     public Animation   getAnimation()     { return animation; }
-
-    public int getFacingX() { return facingX; }
-    public int getFacingY() { return facingY; }
 
     // Combat stats
     public int getAttackLevel()   { return attackLevel; }
@@ -379,4 +423,24 @@ public class Player extends Entity {
     public int getDefenceLevel()  { return defenceLevel; }
     public int getHp()            { return hp; }
     public int getMaxHp()         { return maxHp; }
+
+    // -----------------------------------------------------------------------
+    //  Active prayers — set exclusively by server via ACTIVE_PRAYERS packet
+    // -----------------------------------------------------------------------
+
+    private final Set<String> activePrayers = new HashSet<>();
+
+    /**
+     * Replace the active prayer set with a fresh server snapshot.
+     * Pass an empty array (or null) to clear all active prayers.
+     */
+    public void setActivePrayers(String[] prayerIds) {
+        activePrayers.clear();
+        if (prayerIds != null) Collections.addAll(activePrayers, prayerIds);
+    }
+
+    /** Returns true if the prayer with the given id is currently active. */
+    public boolean isPrayerActive(String prayerId) {
+        return activePrayers.contains(prayerId);
+    }
 }

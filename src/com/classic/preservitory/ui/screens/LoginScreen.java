@@ -222,7 +222,7 @@ public class LoginScreen {
     }
 
     private void drawBackground(Graphics2D g) {
-        BufferedImage bg = AssetManager.getImage("login_bg");
+        BufferedImage bg = AssetManager.getImage("login_screen/background");
         if (bg != null) {
             g.drawImage(bg, 0, 0, screenW, screenH, null);
         } else {
@@ -232,7 +232,7 @@ public class LoginScreen {
     }
 
     private void drawLogo(Graphics2D g) {
-        BufferedImage logo = AssetManager.getImage("logo");
+        BufferedImage logo = AssetManager.getImage("login_screen/logo");
         if (logo != null) {
             double scale = Math.min((double) BOX_W / logo.getWidth(),
                                     (double) LOGO_H / logo.getHeight());
@@ -255,7 +255,7 @@ public class LoginScreen {
     }
 
     private void drawBox(Graphics2D g) {
-        BufferedImage box = AssetManager.getImage("login_box");
+        BufferedImage box = AssetManager.getImage("login_screen/box");
         if (box != null) {
             g.drawImage(box, boxX, boxY, BOX_W, BOX_H, null);
         } else {
@@ -287,7 +287,7 @@ public class LoginScreen {
     }
 
     private void drawSubmitButton(Graphics2D g) {
-        BufferedImage img = AssetManager.getImage("login_button");
+        BufferedImage img = AssetManager.getImage("login_screen/button");
         if (img != null) {
             g.drawImage(img, submitX, submitY, submitW, SUBMIT_H, null);
         } else {

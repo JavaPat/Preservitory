@@ -1,7 +1,8 @@
 {
-  "id": 302,
+  "id": 303,
   "name": "Rare Lobster",
   "value": 0,
   "stackable": false,
-  "tradable": false
+  "tradable": false,
+  "spriteKey": "items/food/fish/rare_lobster"
 }

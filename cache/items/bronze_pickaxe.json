@@ -3,5 +3,9 @@
   "name": "Bronze Pickaxe",
   "value": 40,
   "stackable": false,
-  "tradable": true
+  "tradable": true,
+  "equipSlot": "WEAPON",
+  "attackBonus": 2,
+  "strengthBonus": 1,
+  "spriteKey": "items/axe/bronze"
 }

@@ -6,6 +6,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
 
+import com.classic.preservitory.client.world.ClientProjectile;
 import com.classic.preservitory.client.world.EnemyData;
 import com.classic.preservitory.client.world.LootData;
 import com.classic.preservitory.client.world.NPCData;
@@ -45,7 +46,10 @@ public class ClientConnection {
     //  Remote-player snapshot
     // -----------------------------------------------------------------------
 
-    private final ConcurrentHashMap<String, int[]> remotePlayers = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, int[]>    remotePlayers           = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String>   remotePlayerDirections  = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Boolean>  remotePlayerMoving      = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Boolean>  remotePlayerAttacking   = new ConcurrentHashMap<>();
 
     // -----------------------------------------------------------------------
     //  Outgoing throttle state
@@ -90,8 +94,10 @@ public class ClientConnection {
 
     private Consumer<Map<String, NPCData>>   npcUpdateListener;
     private Consumer<Map<String, EnemyData>> enemyUpdateListener;
+    private Consumer<List<ClientProjectile>> projectileUpdateListener;
     private Consumer<int[]>                  playerHpListener;
     private Consumer<String[]>               skillXpListener;
+    private Consumer<String[]>               activePrayersListener;
     private Consumer<Map<String, int[]>>     skillSnapshotListener;
     private Consumer<int[]>                  damageListener;
     private Consumer<DialogueData>           dialogueListener;
@@ -141,12 +147,20 @@ public class ClientConnection {
         enemyUpdateListener = l;
     }
 
+    public void setProjectileUpdateListener(Consumer<List<ClientProjectile>> l) {
+        projectileUpdateListener = l;
+    }
+
     public void setPlayerHpListener(Consumer<int[]> l) {
         playerHpListener = l;
     }
 
     public void setSkillXpListener(Consumer<String[]> l) {
         skillXpListener = l;
+    }
+
+    public void setActivePrayersListener(Consumer<String[]> l) {
+        activePrayersListener = l;
     }
 
     public void setSkillSnapshotListener(Consumer<Map<String, int[]>> l) {
@@ -405,6 +419,12 @@ public class ClientConnection {
             Map<String, EnemyData> parsed = parseEnemiesMessage(payload);
             if (enemyUpdateListener != null) enemyUpdateListener.accept(parsed);
 
+        // ---- Projectile messages ----
+        } else if (line.startsWith("PROJECTILES")) {
+            String payload = line.length() > 11 ? line.substring(12) : "";
+            List<ClientProjectile> projs = parseProjectilesMessage(payload);
+            if (projectileUpdateListener != null) projectileUpdateListener.accept(projs);
+
         } else if (line.startsWith("PLAYER_HP ")) {
             int[] hp = parsePlayerHp(line.substring(10).trim());
             if (hp != null && playerHpListener != null) {
@@ -457,6 +477,11 @@ public class ClientConnection {
             if (parts.length == 2 && skillXpListener != null) {
                 skillXpListener.accept(parts);
             }
+
+        } else if (line.startsWith("ACTIVE_PRAYERS")) {
+            String rest = line.length() > 15 ? line.substring(15).trim() : "";
+            String[] ids = rest.isEmpty() ? new String[0] : rest.split(" ");
+            if (activePrayersListener != null) activePrayersListener.accept(ids);
 
         } else if (line.equals("SKILLS") || line.startsWith("SKILLS ")) {
             String payload = line.length() > 6 ? line.substring(7) : "";
@@ -556,7 +581,8 @@ public class ClientConnection {
 
     /**
      * Parse a full {@code ENEMIES} payload.
-     * Format per entry: {@code id x y hp maxHp} separated by {@code ;}.
+     * Format per entry: {@code id x y hp maxHp direction moving attacking} separated by {@code ;}.
+     * Older entries with fewer tokens are accepted; missing fields default to false/"south".
      */
     private Map<String, EnemyData> parseEnemiesMessage(String payload) {
         Map<String, EnemyData> result = new LinkedHashMap<>();
@@ -564,14 +590,48 @@ public class ClientConnection {
             entry = entry.trim();
             if (entry.isEmpty()) continue;
             String[] parts = entry.split(" ");
-            if (parts.length != 5) continue;
+            if (parts.length < 5) continue;
             try {
-                String id    = parts[0];
-                int    x     = Integer.parseInt(parts[1]);
-                int    y     = Integer.parseInt(parts[2]);
-                int    hp    = Integer.parseInt(parts[3]);
-                int    maxHp = Integer.parseInt(parts[4]);
-                result.put(id, new EnemyData(x, y, hp, maxHp));
+                String  id        = parts[0];
+                int     x         = Integer.parseInt(parts[1]);
+                int     y         = Integer.parseInt(parts[2]);
+                int     hp        = Integer.parseInt(parts[3]);
+                int     maxHp     = Integer.parseInt(parts[4]);
+                String  direction = parts.length >= 6 ? parts[5] : "south";
+                boolean moving    = parts.length >= 7 && Boolean.parseBoolean(parts[6]);
+                boolean attacking = parts.length >= 8 && Boolean.parseBoolean(parts[7]);
+                result.put(id, new EnemyData(x, y, hp, maxHp, direction, moving, attacking));
+            } catch (NumberFormatException ignored) {}
+        }
+        return result;
+    }
+
+    // -----------------------------------------------------------------------
+    //  Projectile parsing
+    // -----------------------------------------------------------------------
+
+    /**
+     * Parse a full {@code PROJECTILES} payload.
+     * Format per entry: {@code id type fromX fromY toX toY startMs durationMs} separated by {@code ;}.
+     */
+    private List<ClientProjectile> parseProjectilesMessage(String payload) {
+        List<ClientProjectile> result = new ArrayList<>();
+        if (payload.isBlank()) return result;
+        for (String entry : payload.split(";")) {
+            entry = entry.trim();
+            if (entry.isEmpty()) continue;
+            String[] parts = entry.split(" ");
+            if (parts.length < 8) continue;
+            try {
+                String id         = parts[0];
+                String type       = parts[1];
+                int    fromX      = Integer.parseInt(parts[2]);
+                int    fromY      = Integer.parseInt(parts[3]);
+                int    toX        = Integer.parseInt(parts[4]);
+                int    toY        = Integer.parseInt(parts[5]);
+                long   startMs    = Long.parseLong(parts[6]);
+                long   durationMs = Long.parseLong(parts[7]);
+                result.add(new ClientProjectile(id, type, fromX, fromY, toX, toY, startMs, durationMs));
             } catch (NumberFormatException ignored) {}
         }
         return result;
@@ -594,15 +654,16 @@ public class ClientConnection {
             entry = entry.trim();
             if (entry.isEmpty()) continue;
             String[] parts = entry.split(" ");
-            if (parts.length != 5) continue;
+            if (parts.length < 5) continue;
             try {
                 String  id         = parts[0];
                 int     x          = Integer.parseInt(parts[1]);
                 int     y          = Integer.parseInt(parts[2]);
                 String  name       = parts[3];
                 boolean shopkeeper = Boolean.parseBoolean(parts[4]);
-                result.put(id, new NPCData(
-                        id, x, y, name, shopkeeper));
+                String  direction  = parts.length >= 6 ? parts[5] : "south";
+                boolean moving     = parts.length >= 7 && Boolean.parseBoolean(parts[6]);
+                result.put(id, new NPCData(id, x, y, name, shopkeeper, direction, moving));
             } catch (NumberFormatException ignored) {}
         }
         return result;
@@ -635,21 +696,36 @@ public class ClientConnection {
     }
 
     private void parsePlayersMessage(String payload) {
-        Map<String, int[]> updated = new HashMap<>();
+        Map<String, int[]>    updatedPos       = new HashMap<>();
+        Map<String, String>   updatedDir       = new HashMap<>();
+        Map<String, Boolean>  updatedMoving    = new HashMap<>();
+        Map<String, Boolean>  updatedAttacking = new HashMap<>();
         for (String entry : payload.split(";")) {
             entry = entry.trim();
             if (entry.isEmpty()) continue;
             String[] parts = entry.split(" ");
-            if (parts.length != 3) continue;
+            if (parts.length < 3) continue;
             try {
-                String id = parts[0];
-                int    x  = Integer.parseInt(parts[1]);
-                int    y  = Integer.parseInt(parts[2]);
-                updated.put(id, new int[]{x, y});
+                String  id        = parts[0];
+                int     x         = Integer.parseInt(parts[1]);
+                int     y         = Integer.parseInt(parts[2]);
+                String  dir       = parts.length >= 4 ? parts[3] : "south";
+                boolean moving    = parts.length >= 5 && Boolean.parseBoolean(parts[4]);
+                boolean attacking = parts.length >= 6 && Boolean.parseBoolean(parts[5]);
+                updatedPos.put(id, new int[]{x, y});
+                updatedDir.put(id, dir);
+                updatedMoving.put(id, moving);
+                updatedAttacking.put(id, attacking);
             } catch (NumberFormatException ignored) {}
         }
         remotePlayers.clear();
-        remotePlayers.putAll(updated);
+        remotePlayers.putAll(updatedPos);
+        remotePlayerDirections.clear();
+        remotePlayerDirections.putAll(updatedDir);
+        remotePlayerMoving.clear();
+        remotePlayerMoving.putAll(updatedMoving);
+        remotePlayerAttacking.clear();
+        remotePlayerAttacking.putAll(updatedAttacking);
     }
 
     /**
@@ -853,6 +929,32 @@ public class ClientConnection {
         lastSentTime = now;
     }
 
+    /**
+     * Send a tile-step MOVE request to the server.
+     * The server validates adjacency (cardinal, exactly 1 tile) and updates
+     * the authoritative position if valid.
+     *
+     * @param tileCol destination tile column
+     * @param tileRow destination tile row
+     */
+    public void sendMove(int tileCol, int tileRow) {
+        if (!connected || out == null) return;
+        out.println("MOVE " + tileCol + " " + tileRow);
+    }
+
+    /**
+     * Request server-side pathfinding to the given destination tile.
+     * The server runs A*, queues the resulting steps, and moves the player
+     * one tile per 600 ms game tick.
+     *
+     * @param destCol destination tile column
+     * @param destRow destination tile row
+     */
+    public void sendMoveTo(int destCol, int destRow) {
+        if (!connected || out == null) return;
+        out.println("MOVE_TO " + destCol + " " + destRow);
+    }
+
     public void sendPingIfDue() {
         if (!connected || out == null) return;
         long now = System.currentTimeMillis();
@@ -936,6 +1038,28 @@ public class ClientConnection {
         out.println("DROP " + itemId);
     }
 
+    public void sendBuryBone(int itemId) {
+        if (!connected || out == null) return;
+        out.println("BURY_BONE " + itemId);
+    }
+
+    public void sendTogglePrayer(String prayerId) {
+        if (!connected || out == null) return;
+        out.println("TOGGLE_PRAYER " + prayerId);
+    }
+
+    /** Send ALTAR_CLICK — player clicked a Prayer Altar (restores prayer). */
+    public void sendAltarClick() {
+        if (!connected || out == null) return;
+        out.println("ALTAR_CLICK");
+    }
+
+    /** Send ALTAR_BONE_USE — player used a bone on a Prayer Altar (boosted XP). */
+    public void sendAltarBoneUse(int boneItemId) {
+        if (!connected || out == null) return;
+        out.println("ALTAR_BONE_USE " + boneItemId);
+    }
+
     public void sendUnequip(String slot) {
         if (!connected || out == null) return;
         out.println("UNEQUIP " + slot);
@@ -951,12 +1075,29 @@ public class ClientConnection {
         out.println("DIALOGUE_OPTION\t" + index);
     }
 
+    public void sendAutoRetaliate(boolean enabled) {
+        if (!connected || out == null) return;
+        out.println("AUTO_RETALIATE " + enabled);
+    }
+
     // -----------------------------------------------------------------------
     //  Getters
     // -----------------------------------------------------------------------
 
     public Map<String, int[]> getRemotePlayers() {
         return Collections.unmodifiableMap(remotePlayers);
+    }
+
+    public Map<String, String> getRemotePlayerDirections() {
+        return Collections.unmodifiableMap(remotePlayerDirections);
+    }
+
+    public Map<String, Boolean> getRemotePlayerMoving() {
+        return Collections.unmodifiableMap(remotePlayerMoving);
+    }
+
+    public Map<String, Boolean> getRemotePlayerAttacking() {
+        return Collections.unmodifiableMap(remotePlayerAttacking);
     }
 
     public String  getMyId()             { return myId; }

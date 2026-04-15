@@ -57,29 +57,14 @@ public class Tile {
     //  Rendering — isometric diamond
     // -----------------------------------------------------------------------
 
-    /**
-     * Draw this tile as an isometric diamond at its projected screen position.
-     *
-     * Diamond corners (relative to the bounding-box top-left at isoX, isoY):
-     *   Top    (isoX + halfW,      isoY)
-     *   Right  (isoX + ISO_TILE_W, isoY + halfH)
-     *   Bottom (isoX + halfW,      isoY + ISO_TILE_H)
-     *   Left   (isoX,              isoY + halfH)
-     */
+    /** Draw this tile as a filled square at its grid position. */
     public void render(Graphics g) {
-        int isoX = IsoUtils.tileToIsoX(col, row);
-        int isoY = IsoUtils.tileToIsoY(col, row);
-
-        int hw = IsoUtils.ISO_TILE_W / 2;   // 32
-        int hh = IsoUtils.ISO_TILE_H / 2;   // 16
-
-        // Diamond polygon corners
-        int[] xPts = { isoX + hw, isoX + IsoUtils.ISO_TILE_W, isoX + hw, isoX };
-        int[] yPts = { isoY,      isoY + hh,                   isoY + IsoUtils.ISO_TILE_H, isoY + hh };
+        int sx = IsoUtils.tileToIsoX(col, row);
+        int sy = IsoUtils.tileToIsoY(col, row);
+        int ts = IsoUtils.ISO_TILE_W;   // tile size (32)
 
         boolean alt = (col + row) % 2 == 0;
 
-        // Pick base colour from terrain type + checkerboard variant
         Color base;
         switch (type) {
             case GRASS:
@@ -99,29 +84,25 @@ public class Tile {
                 break;
         }
 
-        // Fill diamond
         g.setColor(base);
-        g.fillPolygon(xPts, yPts, 4);
+        g.fillRect(sx, sy, ts, ts);
 
-        // Subtle terrain details inside the diamond
+        // Subtle terrain details
         if (type == TileType.WATER_EDGE) {
-            // Horizontal ripple across the diamond mid-line
             g.setColor(new Color(120, 180, 235, 110));
-            int wy = isoY + hh + (col % 3) - 1;
-            g.drawLine(isoX + hw / 2, wy, isoX + hw + hw / 2, wy);
-
+            int wy = sy + ts / 2 + (col % 3) - 1;
+            g.drawLine(sx + 4, wy, sx + ts - 4, wy);
         } else if (type == TileType.DIRT) {
-            // Two small pebble ovals on some tiles (deterministic)
             if ((col * 3 + row * 5) % 7 < 2) {
                 g.setColor(new Color(165, 125, 72, 150));
-                g.fillOval(isoX + hw - 6, isoY + hh - 3, 4, 3);
-                g.fillOval(isoX + hw + 4, isoY + hh + 1, 3, 2);
+                g.fillOval(sx + ts / 2 - 5, sy + ts / 2 - 2, 4, 3);
+                g.fillOval(sx + ts / 2 + 3, sy + ts / 2 + 1, 3, 2);
             }
         }
 
-        // Grid outline (subtle dark edge on each diamond)
-        g.setColor(new Color(0, 0, 0, 35));
-        g.drawPolygon(xPts, yPts, 4);
+        // Subtle grid line
+        g.setColor(new Color(0, 0, 0, 25));
+        g.drawRect(sx, sy, ts, ts);
     }
 
     // -----------------------------------------------------------------------

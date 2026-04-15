@@ -35,7 +35,7 @@ public class Constants {
     // -----------------------------------------------------------------------
 
     /** Width of the scrollable game-world viewport. */
-    public static final int VIEWPORT_W = 512;
+    public static final int VIEWPORT_W = 515;
 
     /** Height of the game-world viewport (full screen height). */
     public static final int VIEWPORT_H = SCREEN_HEIGHT;

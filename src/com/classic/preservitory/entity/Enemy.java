@@ -2,21 +2,23 @@ package com.classic.preservitory.entity;
 
 import com.classic.preservitory.client.definitions.EnemyDefinition;
 import com.classic.preservitory.client.definitions.EnemyDefinitionManager;
+import com.classic.preservitory.ui.framework.assets.EntitySpriteManager;
+import com.classic.preservitory.ui.framework.assets.SharedSpriteManager;
 import com.classic.preservitory.util.Constants;
 import com.classic.preservitory.util.IsoUtils;
 
 import java.awt.Color;
-import java.awt.Font;
 import java.awt.Graphics;
 
 /**
  * Client-rendered combat enemy driven by a server-side definition.
  *
- * Stats (name, maxHp, attack, defence) come from {@link EnemyDefinition} loaded
- * from {@code cache/enemies/*.json}. No stats are hardcoded here.
+ * Animation is driven by {@link AnimationController}: a single state machine
+ * that requires only the 4 idle rotation sprites.  No walk-frame or attack-frame
+ * files are needed for new enemy types.
  *
- * Rendering style is selected by {@link EnemyDefinition#key}. Unknown keys fall
- * back to the humanoid (goblin) style so new enemy types are always visible.
+ * Stats (name, maxHp, attack, defence) come from {@link EnemyDefinition} loaded
+ * from {@code cache/enemies/*.json}.
  */
 public class Enemy extends Entity {
 
@@ -28,11 +30,67 @@ public class Enemy extends Entity {
     private final EnemyDefinition def;
     private       int             hp;
 
+    // -----------------------------------------------------------------------
+    //  Interpolation
+    // -----------------------------------------------------------------------
+
+    private final EntityInterpolation lerp;
+
+    // direction, isMoving, attacking, walkTick, attackTick, animationState
+    // are all inherited from Entity and driven by AnimationController.
+
+    // -----------------------------------------------------------------------
+    //  Sprites + animation — only idle rotation sprites required
+    // -----------------------------------------------------------------------
+
+    private final EntitySpriteManager spriteManager;
+    private final AnimationController  controller;
+
+    // -----------------------------------------------------------------------
+    //  Combat state — used for conditional HP bar display
+    // -----------------------------------------------------------------------
+
+    /** Timestamp of the last time this enemy's HP decreased (i.e. was hit). */
+    private long lastDamagedMs = 0L;
+
+    // -----------------------------------------------------------------------
+    //  Construction
+    // -----------------------------------------------------------------------
+
     public Enemy(int definitionId, double x, double y) {
         super(x, y, Constants.TILE_SIZE, Constants.TILE_SIZE);
-        this.def   = EnemyDefinitionManager.get(definitionId);
-        this.hp    = this.def.maxHp;
-        this.state = State.ALIVE;
+        this.def           = EnemyDefinitionManager.get(definitionId);
+        this.hp            = this.def.maxHp;
+        this.state         = State.ALIVE;
+        this.lerp          = new EntityInterpolation(x, y);
+        this.spriteManager = new EntitySpriteManager("enemy", def.key, SharedSpriteManager.get());
+        this.controller    = new AnimationController(spriteManager);
+    }
+
+    // -----------------------------------------------------------------------
+    //  Network sync + per-frame lerp
+    // -----------------------------------------------------------------------
+
+    /**
+     * Record a new server-authoritative position and state.
+     * Safe to call every frame — identical positions leave the lerp undisturbed.
+     */
+    public void syncPosition(int serverX, int serverY, String dir, boolean moving) {
+        if (dir != null && !dir.isBlank()) this.direction = dir.trim().toLowerCase();
+        this.isMoving = moving;
+        if (moving) {
+            lerp.syncPosition(serverX, serverY);
+        } else {
+            lerp.snapTo(serverX, serverY);
+        }
+    }
+
+    /** Advance interpolation one render frame. Call before rendering. */
+    public void updateLerp() {
+        lerp.tick();
+        x = lerp.getRenderX();
+        y = lerp.getRenderY();
+        controller.update(this);  // determines animationState, advances walkTick / attackTick
     }
 
     // -----------------------------------------------------------------------
@@ -54,20 +112,24 @@ public class Enemy extends Entity {
     public void render(Graphics g) {
         if (isDead()) return;
 
-        switch (def.key) {
-            case "goblin":
-            default:
-                renderHumanoid(g);
-                break;
-        }
-    }
-
-    private void renderHumanoid(Graphics g) {
-        int isoX = IsoUtils.worldToIsoX(x, y);
-        int isoY = IsoUtils.worldToIsoY(x, y);
-
+        int isoX  = IsoUtils.worldToIsoX(x, y);
+        int isoY  = IsoUtils.worldToIsoY(x, y);
         int footX = isoX + IsoUtils.ISO_TILE_W / 2;
         int footY = isoY + IsoUtils.ISO_TILE_H;
+
+        if (controller.isSpritesLoaded()) {
+            controller.render(this, g);
+        } else {
+            renderHumanoid(g, footX, footY);
+        }
+        // HP bar and name are rendered by GameRenderer (overlay pass)
+    }
+
+    private void renderHumanoid(Graphics g, int footX, int footY) {
+        // Use the same walkTick-driven bob as the sprite path for consistency
+        int bobY = (animationState == AnimationState.WALK)
+                ? ((walkTick % 10 < 5) ? 1 : -1)
+                : 0;
 
         // Shadow on ground
         g.setColor(new Color(0, 0, 0, 70));
@@ -77,7 +139,7 @@ public class Enemy extends Entity {
         int bodyW   = 14;
         int bodyH   = 18;
         int bodyX   = footX - bodyW / 2;
-        int bodyTop = footY - bodyH;
+        int bodyTop = footY - bodyH + bobY;
 
         g.setColor(new Color(140, 75, 55));
         g.fillRect(bodyX, bodyTop, bodyW, bodyH);
@@ -93,17 +155,26 @@ public class Enemy extends Entity {
 
         // Eyes
         g.setColor(new Color(20, 20, 20));
-        g.fillRect(headX + 2,          headTop + 3, 3, 3);
-        g.fillRect(headX + headW - 5,  headTop + 3, 3, 3);
+        g.fillRect(headX + 2,         headTop + 3, 3, 3);
+        g.fillRect(headX + headW - 5, headTop + 3, 3, 3);
 
         // Outline
         g.setColor(Color.DARK_GRAY);
         g.drawRect(bodyX, bodyTop, bodyW, bodyH);
+    }
 
-        // HP bar
+    /**
+     * Height of this entity's rendered body above the foot anchor.
+     * Used to position the HP bar above the sprite or fallback shape.
+     */
+    private int getEntityHeightAboveFoot() {
+        return controller.isSpritesLoaded() ? 45 : 27;
+    }
+
+    public void renderHpBar(Graphics g, int footX, int footY) {
         int barW = IsoUtils.ISO_TILE_W / 2;
         int barX = footX - barW / 2;
-        int barY = headTop - 9;
+        int barY = footY - getEntityHeightAboveFoot() - 10;
         int barH = 4;
 
         g.setColor(new Color(60, 0, 0));
@@ -112,11 +183,6 @@ public class Enemy extends Entity {
         g.fillRect(barX, barY, (int)(barW * getHpFraction()), barH);
         g.setColor(Color.DARK_GRAY);
         g.drawRect(barX, barY, barW, barH);
-
-        // Name tag
-        g.setFont(new Font("Arial", Font.PLAIN, 9));
-        g.setColor(new Color(255, 170, 170));
-        g.drawString(def.name, barX, barY - 2);
     }
 
     // -----------------------------------------------------------------------
@@ -142,9 +208,20 @@ public class Enemy extends Entity {
     /**
      * Sync HP from an authoritative server snapshot.
      * Transitions state to ALIVE or DEAD based on the new value.
+     * Records damage time so {@link #recentlyInCombat()} works correctly.
      */
     public void setHp(int newHp) {
-        this.hp    = Math.max(0, newHp);
+        int clamped = Math.max(0, newHp);
+        if (clamped < this.hp) lastDamagedMs = System.currentTimeMillis();
+        this.hp    = clamped;
         this.state = (this.hp > 0) ? State.ALIVE : State.DEAD;
+    }
+
+    /**
+     * Returns true if this enemy was damaged within the last 3 seconds.
+     * Used to keep the HP bar visible briefly after combat ends.
+     */
+    public boolean recentlyInCombat() {
+        return System.currentTimeMillis() - lastDamagedMs < 3_000L;
     }
 }

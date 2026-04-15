@@ -1,6 +1,9 @@
 package com.classic.preservitory.ui.overlays;
 
 import java.awt.Color;
+import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Graphics2D;
 
 /**
  * A short-lived text label (damage number, XP gain, etc.) that floats upward
@@ -66,4 +69,22 @@ public class FloatingText {
 
     /** Returns true when fully faded — safe to remove from the list. */
     public boolean isDone() { return timer <= 0; }
+
+    /**
+     * Draw this label onto {@code g} using its current position, color, and alpha.
+     * Subclasses override this to change the visual style (e.g. {@code Hitsplat}
+     * draws a colored box instead of bare text).
+     *
+     * The caller is responsible for setting an appropriate font before calling.
+     */
+    public void renderInContext(Graphics2D g) {
+        int a = (int)(alpha * 255);
+        if (a <= 0) return;
+        // Shadow
+        g.setColor(new Color(0, 0, 0, Math.min(a, 180)));
+        g.drawString(text, (int)x + 1, (int)y + 1);
+        // Text
+        g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), a));
+        g.drawString(text, (int)x, (int)y);
+    }
 }

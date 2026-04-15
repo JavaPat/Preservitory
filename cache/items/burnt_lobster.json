@@ -1,0 +1,8 @@
+{
+  "id": 302,
+  "name": "Burnt Lobster",
+  "value": 0,
+  "stackable": false,
+  "tradable": false,
+  "spriteKey": "items/food/fish/burnt_lobster"
+}

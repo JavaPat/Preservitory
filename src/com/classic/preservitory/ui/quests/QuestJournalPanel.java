@@ -1,5 +1,7 @@
 package com.classic.preservitory.ui.quests;
 
+import com.classic.preservitory.ui.panels.RightPanel;
+
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
@@ -8,8 +10,8 @@ import java.util.List;
  * Renders the Quest Journal tab content inside the right panel's content area.
  *
  * === Layout (Y values are screen-absolute) ===
- *   CONTENT_Y (110) – DETAIL_DIVIDER_Y (390) : quest list
- *   DETAIL_DIVIDER_Y (390) – FOOTER_Y  (520) : selected quest detail
+ *   CONTENT_Y – DETAIL_DIVIDER_Y : quest list  (~260 px)
+ *   DETAIL_DIVIDER_Y – FOOTER_Y  : selected quest detail
  *
  * === Sections ===
  *   ACTIVE    — yellow text, shown first (sorted alphabetically)
@@ -23,12 +25,12 @@ import java.util.List;
 public class QuestJournalPanel {
 
     // -----------------------------------------------------------------------
-    //  Layout constants (mirror RightPanel)
+    //  Layout constants — derived from RightPanel so they stay in sync
     // -----------------------------------------------------------------------
 
-    private static final int CONTENT_Y        = 110;
-    private static final int DETAIL_DIVIDER_Y = 390;
-    private static final int FOOTER_Y         = 520;
+    private static final int CONTENT_Y        = RightPanel.CONTENT_Y;
+    private static final int DETAIL_DIVIDER_Y = RightPanel.CONTENT_Y + 260;
+    private static final int FOOTER_Y         = RightPanel.CONTENT_Y + RightPanel.CONTENT_H;
     private static final int ROW_H            = 16;
 
     // First list row starts below header + separator

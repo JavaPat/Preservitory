@@ -1,13 +1,11 @@
 package com.classic.preservitory.ui.screens;
 
-import com.classic.preservitory.cache.CacheLoader;
+import com.classic.preservitory.cache.SpriteCache;
 import com.classic.preservitory.util.Constants;
 
-import javax.imageio.ImageIO;
 import javax.swing.JPanel;
 import java.awt.*;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
 
 /**
  * Full-screen loading screen shown during cache download and extraction.
@@ -55,9 +53,9 @@ public class LoadingScreen extends JPanel {
         g2.setRenderingHint(RenderingHints.KEY_RENDERING,
                 RenderingHints.VALUE_RENDER_QUALITY);
 
-        // Try to pick up images as soon as the cache lands on disk
-        if (background == null) background = loadFromCache("sprites/login_screen/background.png");
-        if (logo == null) logo = loadFromCache("sprites/login_screen/logo.png");
+        // Try to pick up images once the packed cache is available
+        if (background == null) background = SpriteCache.getSprite("login_screen/background");
+        if (logo == null)       logo       = SpriteCache.getSprite("login_screen/logo");
 
         int w = getWidth();
         int h = getHeight();
@@ -135,17 +133,4 @@ public class LoadingScreen extends JPanel {
         g.drawString(status, (w - fm.stringWidth(status)) / 2, h / 2 + 20 + BAR_H + 18);
     }
 
-    // -----------------------------------------------------------------------
-    //  Image loading
-    // -----------------------------------------------------------------------
-
-    private static BufferedImage loadFromCache(String path) {
-        try {
-            byte[] data = CacheLoader.getFile(path);
-            if (data == null) return null;
-            return ImageIO.read(new ByteArrayInputStream(data));
-        } catch (Exception e) {
-            return null;
-        }
-    }
 }

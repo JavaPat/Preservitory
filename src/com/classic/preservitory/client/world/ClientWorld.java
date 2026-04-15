@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -32,7 +33,46 @@ public class ClientWorld {
     private final AtomicReference<Map<String, Loot>> loot =
             new AtomicReference<>(new LinkedHashMap<>());
 
+    /**
+     * Active in-flight projectiles received from the server.
+     * Keyed by projectile ID.  Expired entries are pruned on each update.
+     */
+    private final ConcurrentHashMap<String, ClientProjectile> projectiles =
+            new ConcurrentHashMap<>();
+
     private Consumer<DamageEvent> damageListener;
+
+    // -----------------------------------------------------------------------
+    //  Projectiles
+    // -----------------------------------------------------------------------
+
+    /**
+     * Merge a new server snapshot into the local projectile map.
+     *
+     * New projectiles are added; expired ones are removed.
+     * Existing in-flight projectiles are left untouched so their visual
+     * animation completes even if the server has already removed them
+     * (the server removes them the tick they land).
+     *
+     * @param snapshot list of projectiles from the latest server snapshot
+     */
+    public void updateProjectiles(List<ClientProjectile> snapshot) {
+        // Add any projectile from the snapshot that we haven't seen yet
+        for (ClientProjectile p : snapshot) {
+            projectiles.putIfAbsent(p.id, p);
+        }
+        // Remove any that have visually expired
+        projectiles.entrySet().removeIf(e -> e.getValue().isExpired());
+    }
+
+    /** Returns a snapshot of all currently active (not yet expired) projectiles. */
+    public List<ClientProjectile> getProjectiles() {
+        List<ClientProjectile> result = new ArrayList<>();
+        for (ClientProjectile p : projectiles.values()) {
+            if (!p.isExpired()) result.add(p);
+        }
+        return result;
+    }
 
     public void setDamageListener(java.util.function.Consumer<DamageEvent> listener) {
         this.damageListener = listener;
@@ -44,7 +84,7 @@ public class ClientWorld {
         }
     }
 
-    // ✅ NEW: damage event
+    // damage event
     public static class DamageEvent {
         public final double x;
         public final double y;
@@ -195,8 +235,8 @@ public class ClientWorld {
                     e = enemy;
                 }
 
-                e.setX(d.x);
-                e.setY(d.y);
+                e.syncPosition(d.x, d.y, d.direction, d.moving);
+                if (d.attacking) e.startAttack();
 
                 int oldHp = e.getHp();
                 int newHp = d.hp;
@@ -220,14 +260,20 @@ public class ClientWorld {
     // -----------------------------------------------------------------------
 
     public void updateNpcs(Map<String, NPCData> data) {
-        Map<String, NPC> next = new LinkedHashMap<>();
-        for (Map.Entry<String, NPCData> entry : data.entrySet()) {
-            NPCData d = entry.getValue();
-            NPC npc = new NPC(d.x, d.y, d.name, d.shopkeeper);
-            npc.setId(d.id);
-            next.put(entry.getKey(), npc);
-        }
-        npcs.set(next);
+        updateSnapshot(npcs, next -> {
+            for (Map.Entry<String, NPCData> entry : data.entrySet()) {
+                NPCData d = entry.getValue();
+                NPC npc = next.get(entry.getKey());
+                if (npc == null) {
+                    npc = new NPC(d.x, d.y, d.name, d.shopkeeper);
+                    npc.setId(d.id);
+                    next.put(entry.getKey(), npc);
+                } else {
+                    npc.syncPosition(d.x, d.y, d.direction, d.moving);
+                }
+            }
+            next.keySet().retainAll(data.keySet());
+        });
     }
 
     // -----------------------------------------------------------------------

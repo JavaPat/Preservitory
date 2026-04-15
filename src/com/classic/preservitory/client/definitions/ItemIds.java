@@ -8,15 +8,26 @@ public final class ItemIds {
 
     private ItemIds() {}
 
-    public static final int COINS          = 1;
-    public static final int LOGS           = 2;
-    public static final int ORE            = 3;
-    public static final int BRONZE_AXE     = 100;
-    public static final int BRONZE_PICKAXE = 102;
-    public static final int LOBSTER        = 103;
-    public static final int BRONZE_SWORD   = 104;
-    public static final int BRONZE_HELMET  = 105;
-    public static final int IRON_SWORD     = 106;
-    public static final int IRON_HELMET    = 107;
-    public static final int STEEL_SWORD    = 108;
+    public static final int
+            COINS = 1,
+            LOGS = 2,
+            ORE = 3,
+            COPPER_ORE = 4,
+
+            BRONZE_AXE = 100,
+            BRONZE_PICKAXE = 102,
+            BRONZE_SHIELD = 103,
+            BRONZE_SWORD = 104,
+            BRONZE_HELMET = 105,
+            IRON_SWORD = 106,
+            IRON_HELMET = 107,
+            STEEL_SWORD = 108,
+
+            OAK_BOW = 200,
+            MAGIC_STAFF = 201,
+
+            RAW_LOBSTER = 300,
+            COOKED_LOBSTER = 301,
+            BURNT_LOBSTER = 302,
+            RARE_LOBSTER = 303;
 }

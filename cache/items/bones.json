@@ -1,0 +1,9 @@
+{
+  "id": 400,
+  "name": "Bones",
+  "value": 5,
+  "stackable": false,
+  "tradable": true,
+  "buryable": true,
+  "spriteKey": "items/prayer/bones"
+}

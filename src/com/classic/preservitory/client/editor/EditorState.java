@@ -5,7 +5,9 @@ package com.classic.preservitory.client.editor;
  * No logic — getters and setters only.
  */
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public class EditorState {
 
@@ -13,10 +15,19 @@ public class EditorState {
     private boolean painting = false;
     private String hoverTooltip = null;
 
-    private List<EditorObject> objects          = new ArrayList<>();
-    private List<String>       availableObjects = new ArrayList<>();
-    private String             selectedObjectKey = null;
-    private int                selectedRotation  = 0;
+    private List<EditorObject> objects = new ArrayList<>();
+    private List<String> availableObjects = new ArrayList<>();
+    private String selectedObjectKey = null;
+    private int selectedRotation = 0;
+
+    // ---- Objects panel UI state ----
+    private boolean objectsExpanded = false;
+    private String expandedCategory = null;
+    private int objectPanelScrollY = 0;
+    private Map<String, List<String>> objectCategories = new LinkedHashMap<>();
+
+    // ---- Settings state ----
+    private boolean showMinimap = false;
 
     public int getSelectedTileId() { return selectedTileId; }
     public void setSelectedTileId(int id) { this.selectedTileId = id; }
@@ -38,4 +49,19 @@ public class EditorState {
 
     public int getSelectedRotation() { return selectedRotation; }
     public void setSelectedRotation(int rotation) { this.selectedRotation = rotation; }
+
+    public boolean isObjectsExpanded() { return objectsExpanded; }
+    public void setObjectsExpanded(boolean v) { this.objectsExpanded = v; }
+
+    public String getExpandedCategory() { return expandedCategory; }
+    public void setExpandedCategory(String cat) { this.expandedCategory = cat; }
+
+    public int getObjectPanelScrollY() { return objectPanelScrollY; }
+    public void setObjectPanelScrollY(int y) { this.objectPanelScrollY = y; }
+
+    public Map<String, List<String>> getObjectCategories() { return objectCategories; }
+    public void setObjectCategories(Map<String, List<String>> cats) { this.objectCategories = cats; }
+
+    public boolean isShowMinimap() { return showMinimap; }
+    public void setShowMinimap(boolean v) { this.showMinimap = v; }
 }

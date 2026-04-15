@@ -7,6 +7,8 @@ public enum TabType {
     SKILLS,
     EQUIPMENT,
     QUESTS,
+    PRAYER,
+    LOGOUT,
     SETTINGS,
     KEYBINDINGS
 }

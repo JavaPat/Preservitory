@@ -1,196 +1,119 @@
 package com.classic.preservitory.system;
 
+import com.classic.preservitory.entity.EntityInterpolation;
 import com.classic.preservitory.entity.Player;
-import com.classic.preservitory.input.MouseHandler;
-import com.classic.preservitory.util.Constants;
-
-import java.awt.Point;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 
 /**
- * Moves the player each frame, either along a pre-computed A* path or
- * directly toward a MouseHandler target (fallback / manual movement).
+ * Client-side movement handler for the local player.
  *
- * === Priority ===
- *   1. A* path  — set via {@link #setPath(List)}; followed waypoint by waypoint
- *   2. MouseHandler target — classic direct movement used as a fallback when
- *      pathfinding is unavailable or not requested
+ * Delegates all interpolation math to {@link EntityInterpolation}, which is
+ * shared with RemotePlayer, NPC, and Enemy so the lerp behaviour is identical
+ * across all entity types.
  *
- * After each movement step, {@link Player#setFacing(int, int)} is called so
- * the sprite direction indicator always matches the last direction of travel.
+ * The server is fully authoritative:
+ *   - The server runs A* pathfinding and queues tile steps.
+ *   - The server moves the player exactly one tile per 600 ms game tick.
+ *   - The server broadcasts the confirmed position and {@code moving} flag.
  *
- * The caller (GamePanel) checks {@link #isMoving()} to drive animation states.
+ * This class receives those broadcasts and feeds them into
+ * {@link EntityInterpolation#syncPosition}, which starts a fresh one-tile
+ * lerp only when the position actually changes.  Between ticks the same
+ * position arrives every frame; those calls are silently ignored.
  */
 public class MovementSystem {
 
     // -----------------------------------------------------------------------
-    //  Path-following state
+    //  Timing constant (kept public for any callers that reference it)
     // -----------------------------------------------------------------------
 
-    private final List<Point> path = new ArrayList<>();
-    private int     waypointIndex  = 0;
-    private boolean moving         = false;
+    /** Duration of one server game tick in milliseconds. */
+    public static final long TICK_DURATION_MS = EntityInterpolation.TICK_MS;
 
     // -----------------------------------------------------------------------
-    //  Path control
+    //  State
+    // -----------------------------------------------------------------------
+
+    /** Shared lerp component — lazy-initialised on first server sync. */
+    private EntityInterpolation lerp;
+
+    /** Server-authoritative facing direction ("north/south/east/west"). */
+    private String serverDirection = "south";
+
+    /** Lerp-based moving flag — true while the render position is in flight. */
+    private boolean moving;
+
+    // -----------------------------------------------------------------------
+    //  Server position update  (called every frame from GamePanel)
     // -----------------------------------------------------------------------
 
     /**
-     * Set a new A* path.  Replaces any existing path immediately.
-     * The player begins moving toward the first waypoint on the next update.
+     * Process a PLAYERS broadcast entry for the local player.
+     *
+     * Safe to call every frame — direction and the moving flag are always
+     * updated immediately, but the lerp state is only reset when the server
+     * sends a genuinely new position.
+     *
+     * @param player       the local player whose visual position to update
+     * @param serverX      server-confirmed pixel X (tileCol × TILE_SIZE)
+     * @param serverY      server-confirmed pixel Y (tileRow × TILE_SIZE)
+     * @param direction    facing direction from server
+     * @param serverMoving true if the server stepped the player this tick
      */
-    public void setPath(List<Point> newPath) {
-        path.clear();
-        path.addAll(newPath);
-        waypointIndex = 0;
-        moving = !path.isEmpty();
+    public void syncServerPosition(Player player, int serverX, int serverY,
+                                   String direction, boolean serverMoving) {
+        if (direction != null && !direction.isBlank()) {
+            serverDirection = direction.trim().toLowerCase();
+        }
+        player.setServerMoving(serverMoving);
+
+        if (lerp == null) {
+            lerp = new EntityInterpolation(serverX, serverY);
+        }
+        lerp.syncPosition(serverX, serverY);
     }
 
-    /**
-     * Cancel the current path.
-     * Called by stopAllActivities() and on player death.
-     */
-    public void clearPath() {
-        path.clear();
-        waypointIndex = 0;
-        moving = false;
+    /** @deprecated Use {@link #syncServerPosition(Player, int, int, String, boolean)} */
+    @Deprecated
+    public void onServerPosition(Player player, int serverX, int serverY, String direction) {
+        syncServerPosition(player, serverX, serverY, direction, false);
     }
 
-    /** True while the player is actively moving (either along a path or toward a direct target). */
-    public boolean isMoving() { return moving; }
-
-    /** True if there are still unvisited waypoints in the current path. */
-    public boolean hasPath() { return !path.isEmpty() && waypointIndex < path.size(); }
-
-    /** Read-only view of the current waypoint list (for the debug overlay). */
-    public List<Point> getPath() { return Collections.unmodifiableList(path); }
-
-    /** Index of the next waypoint the player is heading toward. */
-    public int getWaypointIndex() { return waypointIndex; }
+    /** @deprecated Use {@link #syncServerPosition(Player, int, int, String, boolean)} */
+    @Deprecated
+    public void onServerPosition(Player player, int serverX, int serverY,
+                                 String direction, boolean serverMoving) {
+        syncServerPosition(player, serverX, serverY, direction, serverMoving);
+    }
 
     // -----------------------------------------------------------------------
     //  Per-frame update
     // -----------------------------------------------------------------------
 
     /**
-     * Move the player one step toward the current destination.
-     *
-     * @param player       the player to move
-     * @param mouseHandler legacy direct-movement fallback (world-space coords)
-     * @param deltaTime    seconds elapsed since the last frame
+     * Advance the interpolation and apply the result to the player's position.
+     * Called once per frame by the game loop.
      */
-    public void update(Player player, MouseHandler mouseHandler, double deltaTime) {
-        if (hasPath()) {
-            followPath(player, deltaTime);
-        } else if (mouseHandler.hasTarget()) {
-            moveToward(player, mouseHandler.getTargetX(), mouseHandler.getTargetY(),
-                       deltaTime, mouseHandler);
-        } else {
-            moving = false;
+    public void update(Player player, double deltaTime) {
+        if (lerp == null) {
+            lerp = new EntityInterpolation(player.getX(), player.getY());
         }
+        lerp.tick();
+        player.setX(lerp.getRenderX());
+        player.setY(lerp.getRenderY());
+        moving = lerp.isMoving();
+        player.setDirection(serverDirection);
     }
 
     // -----------------------------------------------------------------------
-    //  Internal movement logic
+    //  State queries
     // -----------------------------------------------------------------------
 
-    /**
-     * Advance along the A* waypoint list.
-     * On reaching a waypoint, increments the index and continues to the next.
-     * Updates the player's facing direction based on the movement delta.
-     */
-    private void followPath(Player player, double deltaTime) {
-        if (waypointIndex >= path.size()) {
-            path.clear();
-            moving = false;
-            return;
-        }
+    /** True while the player's visual position is lerping toward the server target. */
+    public boolean isMoving() { return moving; }
 
-        Point wp = path.get(waypointIndex);
-        double dx   = wp.x - player.getCenterX();
-        double dy   = wp.y - player.getCenterY();
-        double dist = Math.sqrt(dx * dx + dy * dy);
+    /** True if the player is actively approaching a destination (same as isMoving). */
+    public boolean hasPath() { return moving; }
 
-        // Update facing before snapping so the dot is correct even when idle
-        updateFacing(player, dx, dy);
-
-        if (dist <= Constants.ARRIVAL_THRESHOLD) {
-            // Snap to waypoint centre and advance
-            player.setX(wp.x - player.getWidth()  / 2.0);
-            player.setY(wp.y - player.getHeight() / 2.0);
-            waypointIndex++;
-            if (waypointIndex >= path.size()) {
-                path.clear();
-                moving = false;
-            }
-            return;
-        }
-
-        double step = player.getSpeed() * deltaTime;
-        moving = true;
-
-        if (step >= dist) {
-            // Would overshoot — snap and advance
-            player.setX(wp.x - player.getWidth()  / 2.0);
-            player.setY(wp.y - player.getHeight() / 2.0);
-            waypointIndex++;
-            if (waypointIndex >= path.size()) {
-                path.clear();
-                moving = false;
-            }
-        } else {
-            player.setX(player.getX() + (dx / dist) * step);
-            player.setY(player.getY() + (dy / dist) * step);
-        }
-    }
-
-    /**
-     * Original direct-movement logic — moves the player's CENTER toward
-     * (targetX, targetY) in a straight line.  Uses world-space coordinates.
-     */
-    private void moveToward(Player player, int targetX, int targetY,
-                             double deltaTime, MouseHandler mouseHandler) {
-        double dx   = targetX - player.getCenterX();
-        double dy   = targetY - player.getCenterY();
-        double dist = Math.sqrt(dx * dx + dy * dy);
-
-        updateFacing(player, dx, dy);
-
-        if (dist <= Constants.ARRIVAL_THRESHOLD) {
-            player.setX(targetX - player.getWidth()  / 2.0);
-            player.setY(targetY - player.getHeight() / 2.0);
-            mouseHandler.clearTarget();
-            moving = false;
-            return;
-        }
-
-        moving = true;
-        double step = player.getSpeed() * deltaTime;
-
-        if (step >= dist) {
-            player.setX(targetX - player.getWidth()  / 2.0);
-            player.setY(targetY - player.getHeight() / 2.0);
-            mouseHandler.clearTarget();
-            moving = false;
-        } else {
-            player.setX(player.getX() + (dx / dist) * step);
-            player.setY(player.getY() + (dy / dist) * step);
-        }
-    }
-
-    /**
-     * Normalise (dx, dy) to unit signs and call {@link Player#setFacing(int, int)}.
-     * Using signum on both axes independently produces all 8 directions
-     * (cardinal + diagonal) without flickering or dominant-axis clamping.
-     * Direction is only updated when there is actual movement.
-     */
-    private void updateFacing(Player player, double dx, double dy) {
-        int nx = (int) Math.signum(dx);
-        int ny = (int) Math.signum(dy);
-        if (nx != 0 || ny != 0) {
-            player.setFacing(nx, ny);
-        }
-    }
+    /** Cancel any in-progress visual movement (clears the moving flag). */
+    public void clearPath() { moving = false; }
 }

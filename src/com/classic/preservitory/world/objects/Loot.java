@@ -12,6 +12,7 @@ import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
 
 /**
  * A ground-loot item dropped by an enemy and waiting to be picked up.
@@ -32,9 +33,9 @@ public class Loot extends Entity {
         this.count  = count;
     }
 
-    public String getId()     { return id;     }
-    public int    getItemId() { return itemId; }
-    public int    getCount()  { return count;  }
+    public String getId() { return id;     }
+    public int getItemId() { return itemId; }
+    public int getCount()  { return count;  }
 
     public boolean containsPoint(int px, int py) {
         int pad = 12;
@@ -61,19 +62,34 @@ public class Loot extends Entity {
             // Pass (cx, cy) as the tile centre; drawCoinStack centres the icon there.
             AssetManager.drawCoinStack(g2, count, cx, cy, false);
         } else {
-            // Non-coin: pale-green oval with a short name label
-            g2.setColor(new Color(90, 185, 80));
-            g2.fillOval(cx - 6, cy - 8, 12, 9);
-            g2.setColor(new Color(50, 120, 40));
-            g2.drawOval(cx - 6, cy - 8, 12, 9);
+            // Non-coin: sprite if available, otherwise pale-green oval fallback
+            String spriteKey = ItemDefinitionManager.get(itemId).spriteKey;
+            BufferedImage sprite = spriteKey != null ? AssetManager.getImage(spriteKey) : null;
+            if (sprite != null) {
+                int size = 24;
+                g2.drawImage(sprite, cx - size / 2, cy - size / 2, size, size, null);
+                if (count > 1) {
+                    String cnt = String.valueOf(count);
+                    g2.setFont(new Font("Arial", Font.BOLD, 7));
+                    g2.setColor(Color.BLACK);
+                    g2.drawString(cnt, cx - 5 + 1, cy - 1 + 1);
+                    g2.setColor(Color.WHITE);
+                    g2.drawString(cnt, cx - 5, cy - 1);
+                }
+            } else {
+                g2.setColor(new Color(90, 185, 80));
+                g2.fillOval(cx - 6, cy - 8, 12, 9);
+                g2.setColor(new Color(50, 120, 40));
+                g2.drawOval(cx - 6, cy - 8, 12, 9);
 
-            String displayName = ItemDefinitionManager.get(itemId).name;
-            String label = count > 1
-                    ? String.valueOf(count)
-                    : displayName.substring(0, Math.min(3, displayName.length()));
-            g2.setFont(new Font("Arial", Font.BOLD, 7));
-            g2.setColor(Color.BLACK);
-            g2.drawString(label, cx - 5, cy - 1);
+                String displayName = ItemDefinitionManager.get(itemId).name;
+                String label = count > 1
+                        ? String.valueOf(count)
+                        : displayName.substring(0, Math.min(3, displayName.length()));
+                g2.setFont(new Font("Arial", Font.BOLD, 7));
+                g2.setColor(Color.BLACK);
+                g2.drawString(label, cx - 5, cy - 1);
+            }
         }
     }
 }

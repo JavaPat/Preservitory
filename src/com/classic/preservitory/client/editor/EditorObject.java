@@ -11,9 +11,9 @@ public class EditorObject {
     public int rotation;
 
     public EditorObject(String key, int tileX, int tileY, int rotation) {
-        this.key      = key;
-        this.tileX    = tileX;
-        this.tileY    = tileY;
+        this.key = key;
+        this.tileX = tileX;
+        this.tileY = tileY;
         this.rotation = rotation;
     }
 }

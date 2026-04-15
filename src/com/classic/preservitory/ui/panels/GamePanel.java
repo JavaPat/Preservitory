@@ -4,14 +4,18 @@ import com.classic.preservitory.client.definitions.ItemDefinitionManager;
 import com.classic.preservitory.client.editor.EditorActions;
 import com.classic.preservitory.client.editor.EditorObject;
 import com.classic.preservitory.client.editor.EditorState;
+import com.classic.preservitory.client.rendering.UIRenderer;
 import com.classic.preservitory.client.settings.ClientSettings;
 import com.classic.preservitory.client.world.ClientWorld;
 import com.classic.preservitory.client.world.map.TileMap;
 import com.classic.preservitory.entity.Animation;
+import com.classic.preservitory.entity.Enemy;
+import com.classic.preservitory.entity.NPC;
 import com.classic.preservitory.entity.Player;
 import com.classic.preservitory.entity.RemotePlayer;
 import com.classic.preservitory.game.GameLoop;
 import com.classic.preservitory.input.MouseHandler;
+import com.classic.preservitory.item.Item;
 import com.classic.preservitory.network.ClientConnection;
 import com.classic.preservitory.system.AttackSystem;
 import com.classic.preservitory.system.CombatSystem;
@@ -24,11 +28,13 @@ import com.classic.preservitory.ui.framework.assets.AssetManager;
 import com.classic.preservitory.ui.framework.assets.PlayerSpriteManager;
 import com.classic.preservitory.ui.overlays.ChatBox;
 import com.classic.preservitory.ui.overlays.FloatingText;
+import com.classic.preservitory.ui.overlays.Hitsplat;
 import com.classic.preservitory.ui.quests.QuestCompleteWindow;
 import com.classic.preservitory.ui.screens.LoginScreen;
 import com.classic.preservitory.ui.shops.ShopWindow;
 import com.classic.preservitory.util.Constants;
 import com.classic.preservitory.util.IsoUtils;
+import com.classic.preservitory.util.RenderUtils;
 import com.classic.preservitory.world.World;
 
 import javax.swing.*;
@@ -88,7 +94,7 @@ public class GamePanel extends JPanel {
     static final long PANEL_HOVER_SUPPRESS_MS = 120L;
 
     // Dynamic layout — depend on current window size; use methods not static fields
-    int getPanelX()     { return getWidth() - Constants.PANEL_W; }
+    public int getPanelX()     { return getWidth() - Constants.PANEL_W; }
     int getViewportW()  { return getWidth() - Constants.PANEL_W; }
     int getLogoutBtnX() { return getPanelX() + 4; }
     int getLogoutBtnY() { return getHeight() - LOGOUT_BTN_H - 2; }
@@ -139,6 +145,7 @@ public class GamePanel extends JPanel {
     ShopWindow shopWindow;
     QuestCompleteWindow questCompleteWindow;
     LoginScreen loginScreen;
+    private int selectedInventorySlot = -1;
 
     // -----------------------------------------------------------------------
     //  Camera (package-private — set by GameRenderer, read by GameInputHandler)
@@ -149,6 +156,16 @@ public class GamePanel extends JPanel {
     /** Persistent zoom-pan offset accumulated by mouse-centred zoom and middle-mouse pan. */
     double cameraZoomOffsetX = 0.0;
     double cameraZoomOffsetY = 0.0;
+
+    /** Smoothed camera position (NaN = uninitialized, snaps on first frame). */
+    double smoothCamX = Double.NaN;
+    double smoothCamY = Double.NaN;
+
+    /**
+     * Minimap zoom level: 1 = full map, 2 = half, 3 = quarter, 4 = eighth.
+     * Controlled by scroll wheel when the cursor is over the minimap.
+     */
+    int minimapZoom = 1;
 
     // -----------------------------------------------------------------------
     //  Middle-mouse pan state
@@ -230,7 +247,11 @@ public class GamePanel extends JPanel {
         this.authStateListener = listener;
     }
 
+    /** Stored package-private so GameInputHandler can fire it from editor mode (e.g. F11). */
+    Runnable editorFullscreenListener;
+
     public void setFullscreenListener(Runnable listener) {
+        this.editorFullscreenListener = listener;
         rightPanel.setFullscreenListener(listener);
     }
 
@@ -273,6 +294,10 @@ public class GamePanel extends JPanel {
         return settings.isShowTotalXp();
     }
 
+    public boolean isShowMinimapEnabled() {
+        return settings.isShowMinimap();
+    }
+
     public void toggleShowFps() {
         settings.setShowFps(!settings.isShowFps());
         rightPanel.setShowFps(settings.isShowFps());
@@ -303,6 +328,24 @@ public class GamePanel extends JPanel {
         rightPanel.setShiftDropListener(listener);
     }
 
+    public void toggleShowMinimap() {
+        settings.setShowMinimap(!settings.isShowMinimap());
+        settings.save();
+    }
+
+    public void setMinimapListener(Runnable listener) {
+        rightPanel.setMinimapListener(listener);
+    }
+
+    public void toggleShowDirectionIndicator() {
+        settings.setShowDirectionIndicator(!settings.isShowDirectionIndicator());
+        settings.save();
+    }
+
+    public void setDirectionListener(Runnable listener) {
+        rightPanel.setDirectionListener(listener);
+    }
+
     public boolean isShowFpsEnabled() {
         return settings.isShowFps();
     }
@@ -311,12 +354,328 @@ public class GamePanel extends JPanel {
         return settings.isShowPing();
     }
 
+    public boolean isEditorMinimapEnabled() {
+        return editorState.isShowMinimap();
+    }
+
+    public void setEditorMinimapEnabled(boolean enabled) {
+        editorState.setShowMinimap(enabled);
+        repaint();
+    }
+
     void setHoverText(String text) {
         hoverText = text != null && !text.isBlank() ? text : "";
     }
 
-    boolean isInGame() {
+    public boolean isInGame() {
         return clientState == ClientState.IN_GAME;
+    }
+
+    public int getSelectedInventorySlot() {
+        return selectedInventorySlot;
+    }
+
+    public void setSelectedInventorySlot(int slotIndex) {
+        selectedInventorySlot = slotIndex >= 0 && slotIndex < InventoryTab.INV_COLS * InventoryTab.INV_ROWS
+                ? slotIndex : -1;
+    }
+
+    public Player getPlayer() {
+        return player;
+    }
+
+    public int getCameraOffsetX() {
+        return cameraOffsetX;
+    }
+
+    public int getCameraOffsetY() {
+        return cameraOffsetY;
+    }
+
+    public int getMouseX() {
+        return inputHandler.hoverX;
+    }
+
+    public int getMouseY() {
+        return inputHandler.hoverY;
+    }
+
+    public ClientWorld getClientWorld() {
+        return clientWorld;
+    }
+
+    public World getWorld() {
+        return world;
+    }
+
+    public int getScreenWidth() {
+        return getWidth();
+    }
+
+    public double getCameraZoomOffsetX() {
+        return cameraZoomOffsetX;
+    }
+
+    public double getCameraZoomOffsetY() {
+        return cameraZoomOffsetY;
+    }
+
+    public void setCameraZoomOffsetX(double value) {
+        cameraZoomOffsetX = value;
+    }
+
+    public void setCameraZoomOffsetY(double value) {
+        cameraZoomOffsetY = value;
+    }
+
+    public double getSmoothCamX() {
+        return smoothCamX;
+    }
+
+    public double getSmoothCamY() {
+        return smoothCamY;
+    }
+
+    public void setSmoothCamX(double value) {
+        smoothCamX = value;
+    }
+
+    public void setSmoothCamY(double value) {
+        smoothCamY = value;
+    }
+
+    public void setCameraOffsetX(int value) {
+        cameraOffsetX = value;
+    }
+
+    public void setCameraOffsetY(int value) {
+        cameraOffsetY = value;
+    }
+
+    public boolean isPlayingGameState() {
+        return gameState == GameState.PLAYING;
+    }
+
+    public ChatBox getChatBox() {
+        return chatBox;
+    }
+
+    public int getChatHeight() {
+        return CHAT_H;
+    }
+
+    public String getCurrentChatInputText() {
+        return inputHandler.isTypingChat ? inputHandler.chatInput.toString() : null;
+    }
+
+    public void renderRightPanelChrome(Graphics2D g2, Player player) {
+        rightPanel.syncPanelX(getPanelX());
+        rightPanel.setPlayer(player);
+        rightPanel.setShopState(shopWindow.isOpen(),
+                shopWindow.getSellPrices());
+        rightPanel.renderChrome(g2);
+    }
+
+    public void renderRightPanelContent(Graphics2D g2, Player player) {
+        rightPanel.syncPanelX(getPanelX());
+        rightPanel.setPlayer(player);
+        rightPanel.setShopState(shopWindow.isOpen(),
+                shopWindow.getSellPrices());
+        rightPanel.renderContentOnly(g2);
+    }
+
+    public void renderRightPanelAt(Graphics2D g2, Player player, int panelX) {
+        rightPanel.syncPanelX(panelX);
+        rightPanel.setPlayer(player);
+        rightPanel.setShopState(shopWindow.isOpen(),
+                shopWindow.getSellPrices());
+        rightPanel.render(g2);
+    }
+
+    public boolean isShopOpen() {
+        return shopWindow.isOpen();
+    }
+
+    public Map<Integer, Integer> getShopSellPrices() {
+        return shopWindow.getSellPrices();
+    }
+
+    public int getInventorySlotCount() {
+        return player.getInventory().getSlotCount();
+    }
+
+    public List<Item> getInventoryItems() {
+        return player.getInventory().getSlots();
+    }
+
+    public Item getInventoryItemAtSlot(int slotIndex) {
+        if (slotIndex < 0) {
+            return null;
+        }
+        List<Item> slots = player.getInventory().getSlots();
+        return slotIndex < slots.size() ? slots.get(slotIndex) : null;
+    }
+
+    public int getRightPanelTabIndexAt(int sx, int sy) {
+        if (!isInGame() || Constants.EDITOR_MODE) {
+            return -1;
+        }
+        int panelX = getPanelX();
+        for (int i = 0; i < TabConfig.TABS.size(); i++) {
+            Rectangle bounds = rightPanel.getTabBounds(i, panelX);
+            if (bounds != null && bounds.contains(sx, sy)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public TabType getRightPanelTabAt(int sx, int sy) {
+        int tabIndex = getRightPanelTabIndexAt(sx, sy);
+        return tabIndex >= 0 ? TabConfig.TABS.get(tabIndex).type : TabType.NONE;
+    }
+
+    public boolean hasMouseTarget() {
+        return mouseHandler.hasTarget();
+    }
+
+    public int getMouseTargetX() {
+        return mouseHandler.getTargetX();
+    }
+
+    public int getMouseTargetY() {
+        return mouseHandler.getTargetY();
+    }
+
+    public Enemy getCombatTargetEnemy() {
+        return combatSystem.getTargetEnemy();
+    }
+
+    public boolean shouldRenderGameMinimap() {
+        return settings.isShowMinimap() && player != null && isInGame();
+    }
+
+    public void renderFullscreenUiOverlays(Graphics2D g2) {
+        shopWindow.render(g2);
+        questCompleteWindow.render(g2);
+    }
+
+    public boolean shouldRenderTargetPanel() {
+        Enemy target = combatSystem.getTargetEnemy();
+        return isInGame() && target != null && target.isAlive() && combatSystem.isInCombat();
+    }
+
+    public void renderLoadingScreen(Graphics2D g) {
+        g.setColor(Color.BLACK);
+        g.fillRect(0, 0, getWidth(), getHeight());
+
+        String text = "Loading - please wait";
+        g.setFont(new Font("Arial", Font.BOLD, 16));
+        FontMetrics fm = g.getFontMetrics();
+        int x = (getWidth() - fm.stringWidth(text)) / 2;
+        int y = getHeight() / 2;
+        RenderUtils.drawOutlinedString(g, text, x, y,
+                new Color(220, 205, 120), new Color(0, 0, 0, 180));
+    }
+
+    public java.util.List<FloatingText> getXpDropsSnapshot() {
+        return new ArrayList<>(xpDrops);
+    }
+
+    public long getTotalXpValue() {
+        return totalXp;
+    }
+
+    public int getPanelBoundaryX() {
+        return getWidth() - Constants.PANEL_W;
+    }
+
+    public int getMinimapSize() {
+        return GameRenderer.MINIMAP_SIZE;
+    }
+
+    public int getMinimapZoom() {
+        return minimapZoom;
+    }
+
+    public int getDisplayedFps() {
+        return displayedFps;
+    }
+
+    public long getPingMs() {
+        return clientConnection.getPingMs();
+    }
+
+    public float getFadeAlpha() {
+        return fadeAlpha;
+    }
+
+    public int getXpTrackerBaseY() {
+        return XP_TRACKER_Y;
+    }
+
+    public boolean shouldRenderXpTracker() {
+        return !isPreGameState() && isShowTotalXpEnabled();
+    }
+
+    public List<FloatingText> getFloatingTextsSnapshot() {
+        return new ArrayList<>(floatingTexts);
+    }
+
+    public boolean shouldRenderActionMessage() {
+        return !isPreGameState() && messageTimer > 0 && !actionMessage.isEmpty();
+    }
+
+    public String getActionMessageText() {
+        return actionMessage;
+    }
+
+    public double getMessageTimerValue() {
+        return messageTimer;
+    }
+
+    public boolean shouldRenderHoverText() {
+        return hoverText != null && !hoverText.isEmpty() && !isPreGameState();
+    }
+
+    public String getHoverTextValue() {
+        return hoverText;
+    }
+
+    public boolean shouldRenderContextMenu() {
+        return !isPreGameState() && contextMenuOpen && !contextMenuOptions.isEmpty();
+    }
+
+    public int getContextMenuRenderWidth() {
+        return inputHandler.getContextMenuWidth();
+    }
+
+    public int getContextMenuRenderHeight() {
+        return inputHandler.getContextMenuHeight();
+    }
+
+    public int getContextMenuRenderX(int menuWidth) {
+        return inputHandler.getContextMenuX(menuWidth);
+    }
+
+    public int getContextMenuRenderY(int menuHeight) {
+        return inputHandler.getContextMenuY(menuHeight);
+    }
+
+    public int getContextMenuHoveredIndex() {
+        return inputHandler.getContextMenuOptionIndex(inputHandler.hoverX, inputHandler.hoverY);
+    }
+
+    public java.util.List<String> getContextMenuLabelsSnapshot() {
+        java.util.List<String> labels = new ArrayList<>(contextMenuOptions.size());
+        for (ContextMenuOption option : contextMenuOptions) {
+            labels.add(option.label);
+        }
+        return labels;
+    }
+
+    public int getContextMenuOptionHeight() {
+        return CONTEXT_MENU_OPTION_H;
     }
 
     boolean isOnLoginScreen() {
@@ -328,10 +687,10 @@ public class GamePanel extends JPanel {
     }
 
     boolean isPreGameState() {
-        return clientState != ClientState.IN_GAME;
+        return clientState == ClientState.LOADING;
     }
 
-    boolean isLoadingState() {
+    public boolean isLoadingState() {
         return clientState == ClientState.LOADING;
     }
 
@@ -370,15 +729,24 @@ public class GamePanel extends JPanel {
     }
 
     void closeActiveInterfacePanel() {
+        selectedInventorySlot = -1;
         rightPanel.closeActiveTab();
     }
 
     void toggleActiveInterfacePanel(TabType targetTab) {
         if (rightPanel.getActiveTab() == targetTab) {
+            selectedInventorySlot = -1;
             rightPanel.closeActiveTab();
             return;
         }
-        inputHandler.closeInterfaces();
+        inputHandler.closeDialogue();
+        if (shopWindow.isOpen()) {
+            shopWindow.close();
+        }
+        questCompleteWindow.softClose();
+        if (targetTab != TabType.INVENTORY) {
+            selectedInventorySlot = -1;
+        }
         rightPanel.openTab(targetTab);
         suppressHoverBriefly();
     }
@@ -416,12 +784,14 @@ public class GamePanel extends JPanel {
     public GamePanel(MusicManager musicManager, ClientSettings settings) {
         this.musicManager = musicManager;
         this.settings = settings;
-        this.rightPanel = new RightPanel(settings);
+        this.rightPanel = new RightPanel(Constants.VIEWPORT_W, settings);
 
         AssetManager.load();
         PlayerSpriteManager.load();
         if (Constants.EDITOR_MODE) {
-            editorState.setAvailableObjects(editorActions.loadAvailableObjects());
+            java.util.List<String> objs = editorActions.loadAvailableObjects();
+            editorState.setAvailableObjects(objs);
+            editorState.setObjectCategories(editorActions.buildObjectCategories(objs));
         }
 
         loginScreen = new LoginScreen(
@@ -479,9 +849,12 @@ public class GamePanel extends JPanel {
         setupNetworkListeners();
 
         rightPanel.setCombatStyleListener(style -> clientConnection.sendCombatStyle(style));
+        rightPanel.setAutoRetaliateListener(enabled -> clientConnection.sendAutoRetaliate(enabled));
         rightPanel.setUnequipListener(slot -> clientConnection.sendUnequip(slot));
         rightPanel.setKeybindingsListener(() -> toggleActiveInterfacePanel(TabType.KEYBINDINGS));
         rightPanel.setKeybindingRebindListener(inputHandler::startKeybindingRebind);
+        rightPanel.setLogoutListener(inputHandler::performLogout);
+        rightPanel.setPrayerToggleListener(prayerId -> clientConnection.sendTogglePrayer(prayerId));
         syncSettingsUi();
 
         clientWorld.setDamageListener(event ->
@@ -518,10 +891,38 @@ public class GamePanel extends JPanel {
 
         addMouseWheelListener(e -> {
             if (Constants.EDITOR_MODE) {
-                targetZoom = Math.max(0.5, Math.min(2.0,
-                        targetZoom - e.getPreciseWheelRotation() * 0.1));
+                // Editor minimap scroll
+                if (editorState.isShowMinimap()) {
+                    int gameAreaW = getWidth() - GameRenderer.EDITOR_PANEL_W;
+                    int emX = gameAreaW - GameRenderer.MINIMAP_SIZE - 10;
+                    if (e.getX() >= emX && e.getX() <= emX + GameRenderer.MINIMAP_SIZE
+                            && e.getY() >= 10 && e.getY() <= 10 + GameRenderer.MINIMAP_SIZE) {
+                        minimapZoom = Math.max(1, Math.min(4, minimapZoom + (e.getWheelRotation() > 0 ? 1 : -1)));
+                        repaint();
+                        return;
+                    }
+                }
+                int editorPanelX = getWidth() - GameRenderer.EDITOR_PANEL_W;
+                if (e.getX() >= editorPanelX
+                        && editorState.isObjectsExpanded()
+                        && editorState.getExpandedCategory() != null) {
+                    int delta = (int)(e.getPreciseWheelRotation() * 15);
+                    editorState.setObjectPanelScrollY(Math.max(0, editorState.getObjectPanelScrollY() + delta));
+                } else {
+                    targetZoom = Math.max(0.5, Math.min(2.0, targetZoom - e.getPreciseWheelRotation() * 0.1));
+                }
                 repaint();
                 return;
+            }
+            // Game minimap scroll
+            if (settings.isShowMinimap() && isInGame()) {
+                int gmX = getViewportW() - GameRenderer.MINIMAP_SIZE - 10;
+                if (e.getX() >= gmX && e.getX() <= gmX + GameRenderer.MINIMAP_SIZE
+                        && e.getY() >= 10 && e.getY() <= 10 + GameRenderer.MINIMAP_SIZE) {
+                    minimapZoom = Math.max(1, Math.min(4, minimapZoom + (e.getWheelRotation() > 0 ? 1 : -1)));
+                    repaint();
+                    return;
+                }
             }
             if (shopWindow.isOpen()) {
                 shopWindow.handleScroll(e.getWheelRotation() > 0 ? 1 : -1);
@@ -651,7 +1052,7 @@ public class GamePanel extends JPanel {
                 totalXp                      = 0L;
                 xpDrops.clear();
                 closeContextMenu();
-                inputHandler.logoutConfirmTimer = 0;
+                rightPanel.resetLogoutConfirm();
                 inputHandler.isTypingChat    = false;
                 inputHandler.chatInput.setLength(0);
 
@@ -685,6 +1086,7 @@ public class GamePanel extends JPanel {
 
         clientConnection.setNpcUpdateListener(clientWorld::updateNpcs);
         clientConnection.setEnemyUpdateListener(clientWorld::updateEnemies);
+        clientConnection.setProjectileUpdateListener(clientWorld::updateProjectiles);
 
         clientConnection.setDamageListener(damage ->
                 clientWorld.handleDamage(damage[0], damage[1], damage[2]));
@@ -696,7 +1098,9 @@ public class GamePanel extends JPanel {
             player.setHp(newHp);
             if (newHp > 0) deathHandled = false;
             int delta = oldHp - newHp;
-            if (delta > 0) spawnDamage(player.getCenterX(), player.getY() - 4, delta, true);
+            if (delta > 0) {
+                spawnDamage(player.getCenterX(), player.getY() - 4, delta, true);
+            }
             if (player.isDead()) handlePlayerDeath();
         });
 
@@ -711,7 +1115,8 @@ public class GamePanel extends JPanel {
             inputHandler.stopAllActivities();
             showMessage(message);
         });
-        clientConnection.setEquipmentListener(eq  -> player.applyEquipmentUpdate(eq));
+        clientConnection.setEquipmentListener(eq -> player.applyEquipmentUpdate(eq));
+        clientConnection.setActivePrayersListener(ids -> player.setActivePrayers(ids));
         clientConnection.setSkillSnapshotListener(snapshot -> {
             player.applySkillSnapshot(snapshot);
             updateTotalXpFromSkills();
@@ -877,7 +1282,7 @@ public class GamePanel extends JPanel {
                 attackSystem.update(deltaTime);
                 // Movement is locked while an attack animation is playing.
                 if (!attackSystem.isAttacking()) {
-                    movementSystem.update(player, mouseHandler, deltaTime);
+                    movementSystem.update(player, deltaTime);
                 }
                 inputHandler.updateInteractions(deltaTime);
 
@@ -901,11 +1306,12 @@ public class GamePanel extends JPanel {
         }
 
         if (messageTimer > 0) messageTimer = Math.max(0, messageTimer - deltaTime);
-        inputHandler.tickLogoutTimer(deltaTime);
+        rightPanel.tickLogout(deltaTime);
 
         clientConnection.sendPingIfDue();
-        if (isInGame()) clientConnection.sendPosition((int) player.getX(), (int) player.getY());
         syncRemotePlayers(deltaTime);
+        clientWorld.getNpcs().forEach(com.classic.preservitory.entity.NPC::updateLerp);
+        clientWorld.getEnemies().forEach(com.classic.preservitory.entity.Enemy::updateLerp);
 
         // Smooth zoom interpolation with mouse-centred camera adjustment
         if (Math.abs(zoom - targetZoom) > 0.001) {
@@ -955,32 +1361,33 @@ public class GamePanel extends JPanel {
     // -----------------------------------------------------------------------
 
     private void syncRemotePlayers(double deltaTime) {
-        Map<String, int[]> netSnapshot = clientConnection.getRemotePlayers();
-        Map<String, RemotePlayer> next = new HashMap<>(remotePlayers);
+        Map<String, int[]>    netSnapshot       = clientConnection.getRemotePlayers();
+        Map<String, String>   dirSnapshot       = clientConnection.getRemotePlayerDirections();
+        Map<String, Boolean>  movingSnapshot    = clientConnection.getRemotePlayerMoving();
+        Map<String, Boolean>  attackingSnapshot = clientConnection.getRemotePlayerAttacking();
+        Map<String, RemotePlayer> next          = new HashMap<>(remotePlayers);
 
         for (Map.Entry<String, int[]> entry : netSnapshot.entrySet()) {
             String id  = entry.getKey();
             int[]  pos = entry.getValue();
 
             if (id.equals(player.getId())) {
-                double dx = Math.abs(player.getX() - pos[0]);
-                double dy = Math.abs(player.getY() - pos[1]);
-                if (dx > Constants.TILE_SIZE * 4 || dy > Constants.TILE_SIZE * 4) {
-                    player.setX(pos[0]);
-                    player.setY(pos[1]);
-                    movementSystem.clearPath();
-                    mouseHandler.clearTarget();
-                }
+                String  dir    = dirSnapshot.getOrDefault(id, "south");
+                boolean moving = Boolean.TRUE.equals(movingSnapshot.get(id));
+                movementSystem.syncServerPosition(player, pos[0], pos[1], dir, moving);
                 continue;
             }
+
+            boolean rpMoving    = Boolean.TRUE.equals(movingSnapshot.get(id));
+            boolean rpAttacking = Boolean.TRUE.equals(attackingSnapshot.get(id));
+            String  rpDir       = dirSnapshot.getOrDefault(id, "south");
 
             RemotePlayer rp = next.get(id);
             if (rp == null) {
                 rp = new RemotePlayer(id, pos[0], pos[1]);
                 next.put(id, rp);
-            } else {
-                rp.setTargetPosition(pos[0], pos[1]);
             }
+            rp.setServerState(pos[0], pos[1], rpMoving, rpAttacking, rpDir);
             rp.update(deltaTime);
         }
 
@@ -1005,7 +1412,7 @@ public class GamePanel extends JPanel {
         if      (combatSystem.isInCombat())       anim = Animation.State.FIGHTING;
         else if (woodcuttingSystem.isChopping())  anim = Animation.State.CHOPPING;
         else if (miningSystem.isMining())         anim = Animation.State.MINING;
-        else if (movementSystem.isMoving())       anim = Animation.State.WALKING;
+        else if (player.isServerMoving())         anim = Animation.State.WALKING;
         else                                      anim = Animation.State.IDLE;
 
         player.getAnimation().setState(anim);
@@ -1032,18 +1439,15 @@ public class GamePanel extends JPanel {
     // -----------------------------------------------------------------------
 
     void spawnDamage(double x, double y, int damage, boolean isPlayerReceiving) {
-        Color c;
-        String text;
-        if (damage == 0) {
-            c = new Color(160, 160, 160); text = "0";
-        } else if (isPlayerReceiving) {
-            c = new Color(220, 55, 55);   text = "-" + damage;
-        } else {
-            c = new Color(255, 220, 50);  text = String.valueOf(damage);
-        }
-        double isoFtX = IsoUtils.worldToIsoX(x, y) + IsoUtils.ISO_TILE_W / 2.0 - 6;
-        double isoFtY = IsoUtils.worldToIsoY(x, y) - 12;
-        floatingTexts.add(new FloatingText(isoFtX, isoFtY, text, c));
+        Color c = damage == 0          ? FloatingText.COLOR_MISS
+                : isPlayerReceiving    ? FloatingText.COLOR_DAMAGE_PLAYER
+                                       : FloatingText.COLOR_DAMAGE_ENEMY;
+        String text = damage == 0 ? "0"
+                    : isPlayerReceiving ? String.valueOf(damage)
+                                       : String.valueOf(damage);
+        double isoX = IsoUtils.worldToIsoX(x, y) + IsoUtils.ISO_TILE_W / 2.0;
+        double isoY = IsoUtils.worldToIsoY(x, y) - 4;
+        floatingTexts.add(new Hitsplat(isoX, isoY, text, c));
     }
 
     // -----------------------------------------------------------------------
@@ -1082,7 +1486,7 @@ public class GamePanel extends JPanel {
         }
     }
 
-    List<RemotePlayer> getRemotePlayersSnapshot() {
+    public List<RemotePlayer> getRemotePlayersSnapshot() {
         return new ArrayList<>(remotePlayers.values());
     }
 
@@ -1133,6 +1537,7 @@ public class GamePanel extends JPanel {
 
     public int getHoveredTileX() { return hoveredTileX; }
     public int getHoveredTileY() { return hoveredTileY; }
+    public List<EditorObject> getEditorObjects() { return editorState.getObjects(); }
 
     public int getSelectedTileId() { return editorState.getSelectedTileId(); }
     public void setSelectedTileId(int id) { editorState.setSelectedTileId(id); }
@@ -1154,12 +1559,14 @@ public class GamePanel extends JPanel {
     }
 
     public void loadMap(String filePath) {
+        System.out.println("Loading from: " + filePath);
         if (editorActions.loadMap(tileMap, editorState, filePath)) {
             repaint();
-            showMessage("Map loaded from " + filePath);
+            System.out.println("Map loaded from " + filePath);
         } else {
-            showMessage("Load failed: " + filePath);
+            System.out.println("Load failed " + filePath);
         }
     }
 
 }
+

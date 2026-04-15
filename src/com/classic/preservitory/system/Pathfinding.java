@@ -13,22 +13,20 @@ import java.util.function.BiPredicate;
  * Obstacles are ALIVE trees and SOLID rocks (queried via {@link World#isTileWalkable}).
  * Enemies and NPCs are treated as passable so the player can walk up to them.
  *
- * 8-directional movement — diagonal cost ≈ 1.4 × cardinal cost (approximated as
- * 14 vs 10 in integer arithmetic).  Corner-cutting through two diagonally touching
- * obstacles is blocked.
+ * 4-directional cardinal movement only (no diagonals).
+ * Uses Manhattan distance heuristic.
  *
  * Returns a list of pixel-space waypoints (tile centres) representing the path
  * from start to goal.  An empty list means no path was found (or start == goal).
  */
 public class Pathfinding {
 
-    // 8-directional neighbour offsets
-    private static final int[] DC = { 1, -1, 0,  0, 1,  1, -1, -1 };
-    private static final int[] DR = { 0,  0, 1, -1, 1, -1,  1, -1 };
+    // 4-directional cardinal neighbour offsets only
+    private static final int[] DC = { 1, -1, 0,  0 };
+    private static final int[] DR = { 0,  0, 1, -1 };
 
-    // Manhattan / Chebyshev cost values (×10 for integer arithmetic)
+    // Cost value (×10 for integer arithmetic)
     private static final int COST_CARDINAL  = 10;
-    private static final int COST_DIAGONAL  = 14;   // ≈ 10 × √2
 
     // -----------------------------------------------------------------------
     //  Public API
@@ -106,7 +104,7 @@ public class Pathfinding {
             int curCol = curIdx % cols;
             int curRow = curIdx / cols;
 
-            for (int i = 0; i < 8; i++) {
+            for (int i = 0; i < 4; i++) {
                 int nc = curCol + DC[i];
                 int nr = curRow + DR[i];
 
@@ -118,15 +116,7 @@ public class Pathfinding {
                 // Only the exact goal tile may be unwalkable (to handle "stand next to" cases)
                 if (!isWalkable(nc, nr, world, extraBlocked) && nIdx != goalIdx) continue;
 
-                // Prevent corner-cutting: both cardinal neighbours must be walkable
-                boolean diagonal = (DC[i] != 0 && DR[i] != 0);
-                if (diagonal) {
-                    if (!isWalkable(curCol + DC[i], curRow, world, extraBlocked)
-                     || !isWalkable(curCol, curRow + DR[i], world, extraBlocked)) continue;
-                }
-
-                int moveCost = diagonal ? COST_DIAGONAL : COST_CARDINAL;
-                int tentG    = gScore[curIdx] + moveCost;
+                int tentG = gScore[curIdx] + COST_CARDINAL;
 
                 if (tentG < gScore[nIdx]) {
                     gScore[nIdx] = tentG;
@@ -181,9 +171,9 @@ public class Pathfinding {
         return row * cols + col;
     }
 
-    /** Chebyshev distance heuristic (admissible for 8-dir movement) × 10. */
+    /** Manhattan distance heuristic (admissible for 4-dir cardinal movement) × 10. */
     private static long h(int c1, int r1, int c2, int r2) {
-        return (long) Math.max(Math.abs(c2 - c1), Math.abs(r2 - r1)) * COST_CARDINAL;
+        return (long)(Math.abs(c2 - c1) + Math.abs(r2 - r1)) * COST_CARDINAL;
     }
 
     /** Walk the parent chain from goal back to start and return pixel waypoints. */

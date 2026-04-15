@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find C:\\\\Users\\\\Patri\\\\IdeaProjects\\\\Preservitory-Server\\\\src:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(xargs grep:*)",
+      "Read(//c/Users/Patri/IdeaProjects/**)",
+      "Bash(dir \"C:\\\\\\\\Users\\\\\\\\Patri\\\\\\\\IdeaProjects\\\\\\\\\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({'frames': d['frames']}, indent=2\\)\\)\")",
+      "Bash(grep -l \"spriteKey\" C:/Users/Patri/IdeaProjects/Preservitory/cache/items/*.json)",
+      "Bash(grep -rL \"spriteKey\" C:/Users/Patri/IdeaProjects/Preservitory/cache/items/*.json)",
+      "Bash(grep:*)",
+      "Read(//c/Users/Patri/.preservitory/cache/**)",
+      "Bash(python3:*)",
+      "Read(//tmp/**)",
+      "Bash(javac -cp \"libs/json-20240303.jar;libs/jlayer-1.0.1.jar\" -d out/production/Preservitory @/tmp/sources.txt)"
+    ]
+  }
+}

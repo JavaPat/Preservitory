@@ -21,7 +21,12 @@ import java.awt.GraphicsEnvironment;
 import java.awt.Rectangle;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.io.File;
 import javax.swing.JFrame;
+import javax.swing.JCheckBoxMenuItem;
+import javax.swing.JMenu;
+import javax.swing.JMenuBar;
+import javax.swing.JMenuItem;
 import javax.swing.SwingUtilities;
 
 public class Game {
@@ -63,12 +68,17 @@ public class Game {
                     panel.setPingListener(panel::toggleShowPing);
                     panel.setTotalXpListener(panel::toggleShowTotalXp);
                     panel.setShiftDropListener(panel::toggleShiftClickDrop);
+                    panel.setMinimapListener(panel::toggleShowMinimap);
+                    panel.setDirectionListener(panel::toggleShowDirectionIndicator);
                     setMaximizeAllowed(false);
                     panel.setFullscreenState(fullscreen);
                     panel.setResizableState(windowedResizable);
                     panel.syncSettingsUi();
                     window.getContentPane().removeAll();
                     window.getContentPane().add(panel, BorderLayout.CENTER);
+                    if (Constants.EDITOR_MODE) {
+                        window.setJMenuBar(buildEditorMenuBar());
+                    }
                     window.revalidate();
                     window.repaint();
                     panel.requestFocusInWindow();
@@ -184,4 +194,49 @@ public class Game {
 
     public JFrame getWindow() { return window; }
     public GamePanel getPanel()  { return panel;  }
+
+    // -------------------------------------------------------------------------
+    //  Editor menu bar (only created when EDITOR_MODE is true)
+    // -------------------------------------------------------------------------
+
+    private JMenuBar buildEditorMenuBar() {
+        JMenuBar menuBar = new JMenuBar();
+
+        // ---- File menu ----
+        JMenu fileMenu = new JMenu("File");
+
+        JMenuItem newItem  = new JMenuItem("New Map");
+        JMenuItem saveItem = new JMenuItem("Save Map");
+        JMenuItem loadItem = new JMenuItem("Load Map");
+
+        // Actions delegate to GamePanel; keyboard shortcuts (N/S/L) remain in
+        // GameInputHandler so no duplicate-fire from JMenuItem accelerators.
+        newItem.addActionListener(e  -> { if (panel != null) panel.newMap(64, 64); });
+        saveItem.addActionListener(e -> { if (panel != null) panel.saveMap(getEditorMapPath("map.json")); });
+        loadItem.addActionListener(e -> { if (panel != null) panel.loadMap(getEditorMapPath("map.json")); });
+
+        fileMenu.add(newItem);
+        fileMenu.add(saveItem);
+        fileMenu.add(loadItem);
+        fileMenu.addSeparator();
+
+        // Settings submenu inside File
+        JMenu settingsMenu = new JMenu("Settings");
+
+        JCheckBoxMenuItem minimapItem = new JCheckBoxMenuItem("Toggle Minimap");
+        minimapItem.setSelected(panel != null && panel.isEditorMinimapEnabled());
+        minimapItem.addActionListener(e -> {
+            if (panel != null) panel.setEditorMinimapEnabled(minimapItem.isSelected());
+        });
+
+        settingsMenu.add(minimapItem);
+        fileMenu.add(settingsMenu);
+
+        menuBar.add(fileMenu);
+        return menuBar;
+    }
+
+    private String getEditorMapPath(String fileName) {
+        return System.getProperty("user.dir") + File.separator + fileName;
+    }
 }

@@ -1,81 +1,62 @@
 package com.classic.preservitory.util;
 
 /**
- * Isometric coordinate utilities.
+ * Square-grid coordinate utilities.
  *
  * World space  : entities and tiles use pixel coordinates (col * TILE_SIZE, row * TILE_SIZE).
- * Iso screen   : the 2.5D projected view drawn by every render() method.
+ * Screen space : identical to world space — no projection is applied.
+ *                The camera translates but does not skew.
  *
- * Projection formulas (tile units → iso screen pixels):
- *   isoX = (tileCol - tileRow) * ISO_TILE_W / 2
- *   isoY = (tileCol + tileRow) * ISO_TILE_H / 2
- *
- * Inverse (iso screen pixels → tile units):
- *   tileCol = (isoX / halfW + isoY / halfH) / 2
- *   tileRow = (isoY / halfH - isoX / halfW) / 2
+ * Kept the original method names and constants so all call-sites compile without change.
+ * ISO_TILE_W / ISO_TILE_H are now both equal to TILE_SIZE (32 px).
  */
 public class IsoUtils {
 
-    /** Width of one isometric tile diamond in pixels. */
-    public static final int ISO_TILE_W = 64;
+    /** Width of one tile in pixels. */
+    public static final int ISO_TILE_W = Constants.TILE_SIZE;   // 32
 
-    /** Height of one isometric tile diamond in pixels. */
-    public static final int ISO_TILE_H = 32;
-
-    private static final double HALF_W = ISO_TILE_W / 2.0;   // 32.0
-    private static final double HALF_H = ISO_TILE_H / 2.0;   // 16.0
+    /** Height of one tile in pixels. */
+    public static final int ISO_TILE_H = Constants.TILE_SIZE;   // 32
 
     // -----------------------------------------------------------------------
-    //  Tile grid → iso screen
+    //  Tile grid → screen  (col/row → pixel top-left of tile)
     // -----------------------------------------------------------------------
 
-    /** Iso screen X for an integer tile at (col, row). */
+    /** Screen X of the top-left corner of tile (col, row). */
     public static int tileToIsoX(int col, int row) {
-        return (col - row) * (ISO_TILE_W / 2);
+        return col * Constants.TILE_SIZE;
     }
 
-    /** Iso screen Y for an integer tile at (col, row). */
+    /** Screen Y of the top-left corner of tile (col, row). */
     public static int tileToIsoY(int col, int row) {
-        return (col + row) * (ISO_TILE_H / 2);
+        return row * Constants.TILE_SIZE;
     }
 
     // -----------------------------------------------------------------------
-    //  World pixel → iso screen  (supports sub-tile float positions)
+    //  World pixel → screen  (supports sub-tile float positions)
     // -----------------------------------------------------------------------
 
-    /**
-     * Iso screen X for a world-space pixel position (wx, wy).
-     * Uses the same scale as {@link Constants#TILE_SIZE} (32 px per tile).
-     */
+    /** Screen X for a world-space pixel position. Identity in the square grid. */
     public static int worldToIsoX(double wx, double wy) {
-        double col = wx / Constants.TILE_SIZE;
-        double row = wy / Constants.TILE_SIZE;
-        return (int) ((col - row) * HALF_W);
+        return (int) wx;
     }
 
-    /** Iso screen Y for a world-space pixel position (wx, wy). */
+    /** Screen Y for a world-space pixel position. Identity in the square grid. */
     public static int worldToIsoY(double wx, double wy) {
-        double col = wx / Constants.TILE_SIZE;
-        double row = wy / Constants.TILE_SIZE;
-        return (int) ((col + row) * HALF_H);
+        return (int) wy;
     }
 
     // -----------------------------------------------------------------------
-    //  Iso screen → tile grid  (used by click / hover detection)
+    //  Screen → tile grid  (used by click / hover detection)
     // -----------------------------------------------------------------------
 
-    /**
-     * Tile column for an iso-space screen point (sx, sy).
-     * Returns the integer tile column the point falls inside.
-     */
+    /** Tile column for a screen point (sx, sy). */
     public static int isoToTileCol(int sx, int sy) {
-        double tileX = (sx / HALF_W + sy / HALF_H) / 2.0;
-        return (int) Math.floor(tileX);
+        return Math.floorDiv(sx, Constants.TILE_SIZE);
     }
 
-    /** Tile row for an iso-space screen point (sx, sy). */
+    /** Tile row for a screen point (sx, sy). */
     public static int isoToTileRow(int sx, int sy) {
-        double tileY = (sy / HALF_H - sx / HALF_W) / 2.0;
-        return (int) Math.floor(tileY);
+        return Math.floorDiv(sy, Constants.TILE_SIZE);
     }
 }

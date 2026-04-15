@@ -3,5 +3,6 @@
   "name": "Cooked Lobster",
   "value": 80,
   "stackable": false,
-  "tradable": true
+  "tradable": true,
+  "spriteKey": "items/food/fish/cooked_lobster"
 }

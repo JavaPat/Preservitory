@@ -2,53 +2,28 @@ package com.classic.preservitory.ui.panels;
 
 import com.classic.preservitory.client.definitions.ItemDefinitionManager;
 import com.classic.preservitory.entity.Player;
-import com.classic.preservitory.util.Constants;
+import com.classic.preservitory.ui.framework.TabRenderer;
 
 import java.awt.*;
 import java.util.function.Consumer;
 
 /**
  * Renders the Equipment tab content: equipped weapon and helmet slots.
- *
- * Display only — reads Player equipped item data, never modifies it.
- * Unequip actions fire a callback registered via setUnequipListener.
  */
-class EquipmentTab implements Tab {
+class EquipmentTab implements TabRenderer {
 
-    // -----------------------------------------------------------------------
-    //  Layout
-    // -----------------------------------------------------------------------
+    private Player            player          = null;
+    private int               weaponRowY      = 0;
+    private int               helmetRowY      = 0;
+    private boolean           weaponEquipped  = false;
+    private boolean           helmetEquipped  = false;
+    private Consumer<String>  unequipListener = null;
 
-    private static final int CONTENT_Y = 110;
+    void setPlayer(Player p)                         { this.player = p; }
+    void setUnequipListener(Consumer<String> listener) { unequipListener = listener; }
 
-    // -----------------------------------------------------------------------
-    //  State — screen-absolute Y of each row, set during render
-    // -----------------------------------------------------------------------
-
-    private int              weaponRowY      = 0;
-    private int              helmetRowY      = 0;
-    private boolean          weaponEquipped  = false;
-    private boolean          helmetEquipped  = false;
-    private Consumer<String> unequipListener = null;
-
-    // -----------------------------------------------------------------------
-    //  Configuration
-    // -----------------------------------------------------------------------
-
-    void setUnequipListener(Consumer<String> listener) {
-        this.unequipListener = listener;
-    }
-
-    // -----------------------------------------------------------------------
-    //  Input
-    // -----------------------------------------------------------------------
-
-    /**
-     * Handle a click inside the equipment tab content area.
-     * No scroll offset — rows are rendered at screen-absolute Y positions.
-     */
     @Override
-    public void handleClick(int sx, int sy, int px, int pw) {
+    public void handleClick(int sx, int sy, int x, int y, int width, int height) {
         if (unequipListener == null) return;
         if (weaponRowY > 0 && sy >= weaponRowY && sy < weaponRowY + 16)
             unequipListener.accept("WEAPON");
@@ -56,41 +31,36 @@ class EquipmentTab implements Tab {
             unequipListener.accept("HELMET");
     }
 
-    // -----------------------------------------------------------------------
-    //  Rendering
-    // -----------------------------------------------------------------------
-
-    void render(Graphics2D g, Player player, int px, int pw) {
-        int x  = px + 8;
-        int bw = pw - 16;
-        int y  = CONTENT_Y + 10;
-
-        g.setFont(new Font("Arial", Font.BOLD, 10));
-        drawOutlined(g, "EQUIPMENT", px + pw / 2 - 24, y + 2,
-                new Color(200, 185, 100), new Color(0, 0, 0, 160));
-        y += 14;
-
-        weaponRowY = y;
-        weaponEquipped = player.getEquippedItemId("WEAPON") != -1;
-        y = drawEquipRow(g, x, y, bw, "Weapon", player.getEquippedItemId("WEAPON"));
-        helmetRowY = y;
-        helmetEquipped = player.getEquippedItemId("HELMET") != -1;
-        y = drawEquipRow(g, x, y, bw, "Helmet", player.getEquippedItemId("HELMET"));
-    }
-
-    String getHoveredButtonLabel(int sx, int sy) {
-        if (weaponEquipped && weaponRowY > 0 && sy >= weaponRowY && sy < weaponRowY + 16) {
+    @Override
+    public String getHoveredLabel(int sx, int sy, int x, int y, int width, int height) {
+        if (weaponEquipped && weaponRowY > 0 && sy >= weaponRowY && sy < weaponRowY + 16)
             return "Unequip weapon";
-        }
-        if (helmetEquipped && helmetRowY > 0 && sy >= helmetRowY && sy < helmetRowY + 16) {
+        if (helmetEquipped && helmetRowY > 0 && sy >= helmetRowY && sy < helmetRowY + 16)
             return "Unequip helmet";
-        }
         return null;
     }
 
-    // -----------------------------------------------------------------------
-    //  Private draw helpers
-    // -----------------------------------------------------------------------
+    @Override
+    public void render(Graphics2D g, int x, int y, int width, int height) {
+        if (player == null) return;
+
+        int bx = x + 8;
+        int bw = width - 16;
+        int cy = y + 10;
+
+        g.setFont(new Font("Arial", Font.BOLD, 10));
+        drawOutlined(g, "EQUIPMENT", x + width / 2 - 24, cy + 2,
+                new Color(200, 185, 100), new Color(0, 0, 0, 160));
+        cy += 14;
+
+        weaponRowY     = cy;
+        weaponEquipped = player.getEquippedItemId("WEAPON") != -1;
+        cy = drawEquipRow(g, bx, cy, bw, "Weapon", player.getEquippedItemId("WEAPON"));
+
+        helmetRowY     = cy;
+        helmetEquipped = player.getEquippedItemId("HELMET") != -1;
+        cy = drawEquipRow(g, bx, cy, bw, "Helmet", player.getEquippedItemId("HELMET"));
+    }
 
     private int drawEquipRow(Graphics2D g, int x, int y, int bw, String slotLabel, int itemId) {
         boolean equipped = itemId != -1;
@@ -109,7 +79,6 @@ class EquipmentTab implements Tab {
             g.setColor(new Color(140, 110, 45, 100));
             g.drawLine(x + bw - iw, y + 12, x + bw, y + 12);
         }
-
         return y + 16;
     }
 

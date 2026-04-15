@@ -158,7 +158,7 @@ public class ShopWindow {
     }
 
     private void drawBackground(Graphics2D g) {
-        BufferedImage bg = AssetManager.getImage("shop_window");
+        BufferedImage bg = AssetManager.getImage("shop/window");
         if (bg != null) {
             g.drawImage(bg, winX, winY, WIN_W, WIN_H, null);
         } else {
@@ -189,7 +189,7 @@ public class ShopWindow {
     }
 
     private void drawCloseButton(Graphics2D g) {
-        String key = closeHovered ? "close_hover" : "close";
+        String key = closeHovered ? "shop/close_button_hover" : "shop/close_button";
         BufferedImage img = AssetManager.getImage(key);
         if (img != null) {
             g.drawImage(img, closeX, closeY, CLOSE_SZ, CLOSE_SZ, null);
@@ -230,7 +230,7 @@ public class ShopWindow {
 
     private void drawSlot(Graphics2D g, int x, int y, ShopItem item, boolean hovered) {
         // Slot background sprite
-        BufferedImage slotImg = AssetManager.getImage("grid_slot");
+        BufferedImage slotImg = AssetManager.getImage("shop/grid_button");
         if (slotImg != null) {
             g.drawImage(slotImg, x, y, SLOT_W, SLOT_H, null);
         } else {

@@ -2,172 +2,207 @@ package com.classic.preservitory.ui.panels;
 
 import com.classic.preservitory.client.settings.ClientSettings;
 import com.classic.preservitory.entity.Player;
+import com.classic.preservitory.ui.framework.UIComponent;
+import com.classic.preservitory.ui.framework.assets.AssetManager;
 import com.classic.preservitory.ui.quests.QuestEntry;
 import com.classic.preservitory.util.Constants;
 
 import java.awt.*;
-import java.util.EnumMap;
+import java.awt.image.BufferedImage;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * Draws and handles input for the fixed right-side panel.
+ * UIComponent for the fixed right-side panel.
  *
- * === Layout (all Y values are screen-absolute) ===
- *   0  –  82 : Stats bar — HP progress bar + current activity label
- *   82 – 110 : Tab icons — [CMB] [INV] [SKL] [EQP] [QST]
- *  110 – 520 : Tab content — delegated to the active tab class
- *  520 – 600 : Footer — keyboard shortcuts
+ * === Hierarchy ===
+ *   RightPanel
+ *     ├── TopTabBar    (y = 0..TAB_BAR_HEIGHT)
+ *     ├── ContentPanel (y = TAB_BAR_HEIGHT..BOTTOM_BAR_Y)
+ *     └── BottomTabBar (y = BOTTOM_BAR_Y..SCREEN_HEIGHT)
  *
- * === Tab routing ===
- *   GameInputHandler detects tab-bar clicks, resolves the clicked tab index,
- *   and updates TabManager.
- *   Content-area clicks are routed via handleClick() to the active tab.
+ * === Render order ===
+ *   1. inventory_box  — full panel background
+ *   2. topTabBar.render()
+ *   3. contentPanel.render()
+ *   4. bottomTabBar.render()
  */
-public class RightPanel {
-
-    private int hoveredTabIndex = -1;
+public class RightPanel extends UIComponent {
 
     // -----------------------------------------------------------------------
-    //  Layout constants — package-private so GameInputHandler can reference them
+    //  Layout constants — public so cross-package classes can access them
     // -----------------------------------------------------------------------
 
-    static final int STATS_H   = 82;
-    static final int TAB_Y     = STATS_H;           //  82
-    static final int TAB_H     = 24;
-    static final int CONTENT_Y = TAB_Y + TAB_H;     // 110
-    static final int CONTENT_H = 410;
-    static final int FOOTER_Y  = CONTENT_Y + CONTENT_H; // 520
+    public  static final int TAB_BAR_HEIGHT  = 36;
+    public  static final int CONTENT_PADDING = 10;
+    public  static final int CONTENT_Y       = TAB_BAR_HEIGHT;
+    public  static final int CONTENT_H       = Constants.SCREEN_HEIGHT - (TAB_BAR_HEIGHT * 2);
+    public  static final int BOTTOM_BAR_Y    = CONTENT_Y + CONTENT_H;
 
-    /** Number of tabs; used by GameRenderer and GameInputHandler. */
-    static final int TAB_COUNT = TabConfig.TABS.size();
+    // Top bar: all tabs except SETTINGS + LOGOUT; bottom bar: SETTINGS + LOGOUT
+    static final int TOP_TAB_COUNT    = TabConfig.TABS.size() - 2;
+    static final int BOTTOM_TAB_COUNT = TabConfig.TABS.size() - TOP_TAB_COUNT;
 
     // -----------------------------------------------------------------------
-    //  Tab management + tab instances
+    //  Tab renderer instances
     // -----------------------------------------------------------------------
 
-    /** Package-private so GameInputHandler can call tabManager.setTab() directly. */
-    final TabManager tabManager = new TabManager();
-
-    private final CombatTab     combatTab     = new CombatTab();
-    private final InventoryTab  inventoryTab  = new InventoryTab();
-    private final SkillsTab     skillsTab     = new SkillsTab();
-    private final EquipmentTab  equipmentTab  = new EquipmentTab();
-    private final QuestTab      questTab      = new QuestTab();
-    private final SettingsTab   settingsTab;
+    private final CombatTab      combatTab;
+    private final InventoryTab   inventoryTab;
+    private final SkillsTab      skillsTab;
+    private final EquipmentTab   equipmentTab;
+    private final QuestTab       questTab;
+    private final PrayerTab      prayerTab;
+    private final LogoutTab      logoutTab;
+    private final SettingsTab    settingsTab;
     private final KeybindingsTab keybindingsTab;
 
-    /** Single dispatch map — all content-area clicks go through Tab.handleClick(). */
-    private final Map<TabType, Tab> tabHandlers = new EnumMap<>(TabType.class);
+    // -----------------------------------------------------------------------
+    //  Component hierarchy
+    // -----------------------------------------------------------------------
 
-    public RightPanel(ClientSettings settings) {
-        settingsTab = new SettingsTab(settings);
+    final TabManager   tabManager;
+    private final TabBar       topTabBar;
+    private final ContentPanel contentPanel;
+    private final TabBar       bottomTabBar;
+
+    // -----------------------------------------------------------------------
+    //  Construction
+    // -----------------------------------------------------------------------
+
+    public RightPanel(int panelX, ClientSettings settings) {
+        super(panelX, 0, Constants.PANEL_W, Constants.SCREEN_HEIGHT);
+
+        // Build tab renderer instances
+        combatTab      = new CombatTab();
+        inventoryTab   = new InventoryTab();
+        skillsTab      = new SkillsTab();
+        equipmentTab   = new EquipmentTab();
+        questTab       = new QuestTab();
+        prayerTab      = new PrayerTab();
+        logoutTab      = new LogoutTab();
+        settingsTab    = new SettingsTab(settings);
         keybindingsTab = new KeybindingsTab(settings);
-        tabHandlers.put(TabType.COMBAT,     combatTab);
-        tabHandlers.put(TabType.INVENTORY,  inventoryTab);
-        tabHandlers.put(TabType.SKILLS,     skillsTab);
-        tabHandlers.put(TabType.EQUIPMENT,  equipmentTab);
-        tabHandlers.put(TabType.QUESTS,     questTab);
-        tabHandlers.put(TabType.SETTINGS,   settingsTab);
-        tabHandlers.put(TabType.KEYBINDINGS, keybindingsTab);
+
+        // Build Tab objects — type + icon key + renderer
+        List<Tab> topTabs = new ArrayList<>();
+        List<Tab> bottomTabs = new ArrayList<>();
+
+        for (int i = 0; i < TabConfig.TABS.size(); i++) {
+            TabConfig cfg = TabConfig.TABS.get(i);
+            Tab tab = new Tab(cfg.type, cfg.iconKey, rendererFor(cfg.type));
+            if (i < TOP_TAB_COUNT) topTabs.add(tab);
+            else                   bottomTabs.add(tab);
+        }
+
+        tabManager = new TabManager(topTabs, bottomTabs);
+
+        // Build sub-components
+        topTabBar    = new TabBar(panelX + CONTENT_PADDING, 0,
+                Constants.PANEL_W - CONTENT_PADDING * 2, TAB_BAR_HEIGHT, topTabs, tabManager);
+        contentPanel = new ContentPanel(panelX + CONTENT_PADDING, CONTENT_Y + CONTENT_PADDING,
+                Constants.PANEL_W - CONTENT_PADDING * 2, CONTENT_H - CONTENT_PADDING * 2, tabManager);
+        bottomTabBar = new TabBar(panelX + CONTENT_PADDING, BOTTOM_BAR_Y,
+                Constants.PANEL_W - CONTENT_PADDING * 2, TAB_BAR_HEIGHT, bottomTabs, tabManager);
+    }
+
+    private com.classic.preservitory.ui.framework.TabRenderer rendererFor(TabType type) {
+        return switch (type) {
+            case COMBAT      -> combatTab;
+            case INVENTORY   -> inventoryTab;
+            case SKILLS      -> skillsTab;
+            case EQUIPMENT   -> equipmentTab;
+            case QUESTS      -> questTab;
+            case PRAYER      -> prayerTab;
+            case LOGOUT      -> logoutTab;
+            case SETTINGS    -> settingsTab;
+            case KEYBINDINGS -> keybindingsTab;
+            default          -> (g2, cx, cy, cw, ch) -> {};
+        };
     }
 
     // -----------------------------------------------------------------------
-    //  Configuration — delegate to tabs
+    //  Context update — call before render each frame
     // -----------------------------------------------------------------------
 
-    public void setQuestEntries(List<QuestEntry> entries) {
-        questTab.setQuestEntries(entries);
+    public void setPlayer(Player player) {
+        inventoryTab .setPlayer(player);
+        skillsTab    .setPlayer(player);
+        equipmentTab .setPlayer(player);
+        prayerTab    .setPlayer(player);
     }
 
-    public void setCombatStyleListener(Consumer<String> listener) {
-        combatTab.setCombatStyleListener(listener);
-    }
-
-    public void setUnequipListener(Consumer<String> listener) {
-        equipmentTab.setUnequipListener(listener);
-    }
-
-    public void setFullscreenListener(Runnable listener) {
-        settingsTab.setFullscreenListener(listener);
-    }
-
-    public void setResizableListener(Runnable listener) {
-        settingsTab.setResizableListener(listener);
-    }
-
-    public void setFpsListener(Runnable listener) {
-        settingsTab.setFpsListener(listener);
-    }
-
-    public void setPingListener(Runnable listener) {
-        settingsTab.setPingListener(listener);
-    }
-
-    public void setTotalXpListener(Runnable listener) {
-        settingsTab.setTotalXpListener(listener);
-    }
-
-    public void setKeybindingsListener(Runnable listener) {
-        settingsTab.setKeybindingsListener(listener);
-    }
-
-    public void setShiftDropListener(Runnable listener) {
-        settingsTab.setShiftDropListener(listener);
-    }
-
-    public void setKeybindingRebindListener(Consumer<ClientSettings.Action> listener) {
-        keybindingsTab.setRebindListener(listener);
-    }
-
-    public void setListeningKeybindingAction(ClientSettings.Action action) {
-        keybindingsTab.setListeningAction(action);
-    }
-
-    public void setFullscreen(boolean fullscreen) {
-        settingsTab.setFullscreen(fullscreen);
-    }
-
-    public void setResizable(boolean resizable) {
-        settingsTab.setResizable(resizable);
-    }
-
-    public void setShowFps(boolean showFps) {
-        settingsTab.setShowFps(showFps);
-    }
-
-    public void setShowPing(boolean showPing) {
-        settingsTab.setShowPing(showPing);
-    }
-
-    public boolean isInsideSettingsPanel(int sx, int sy) {
-        return tabManager.getActiveTab() == TabType.SETTINGS && settingsTab.containsPoint(sx, sy);
+    public void setShopState(boolean shopOpen, Map<Integer, Integer> sellPrices) {
+        inventoryTab.setShopState(shopOpen, sellPrices);
     }
 
     // -----------------------------------------------------------------------
-    //  Public API — input
+    //  UIComponent — render
     // -----------------------------------------------------------------------
 
-    public int getTabIndexAtScreenX(int sx, int panelX) {
-        int pw = Constants.PANEL_W;
-        if (sx < panelX || sx >= panelX + pw) return -1;
-
-        int tabW = pw / TAB_COUNT;
-        int rel  = sx - panelX;
-        return Math.min(TAB_COUNT - 1, rel / tabW);
+    @Override
+    public void render(Graphics2D g) {
+        syncPanelX(x);
+        // 1. Full panel background
+        drawPanelBackground(g);
+        // 2. Top tab bar (sprite + icons)
+        topTabBar.render(g);
+        // 2a. Bridge the seam between the active top tab and the content area
+        drawActiveTabConnection(g);
+        // 3. Active tab content
+        contentPanel.render(g);
+        // 4. Bottom tab bar (sprite + icons)
+        bottomTabBar.render(g);
     }
 
-    public Rectangle getTabBounds(int index, int panelX) {
-        int pw    = Constants.PANEL_W;
-        int tabW  = pw / TAB_COUNT;
-        int slotX = panelX + index * tabW;
-        int slotW = (index == TAB_COUNT - 1) ? pw - index * tabW : tabW;
-        return new Rectangle(slotX, TAB_Y, slotW, TAB_H);
+    public void renderChrome(Graphics2D g) {
+        syncPanelX(x);
+        drawPanelBackground(g);
     }
+
+    public void renderContentOnly(Graphics2D g) {
+        syncPanelX(x);
+        contentPanel.render(g);
+    }
+
+    // -----------------------------------------------------------------------
+    //  UIComponent — input
+    // -----------------------------------------------------------------------
+
+    @Override
+    public void handleClick(int sx, int sy) {
+        if (sx < x || sx >= x + width) return;
+        // Tab bars are handled externally (GameInputHandler) via getTabBounds
+        // Content area
+        if (sy >= CONTENT_Y && sy < BOTTOM_BAR_Y) {
+            contentPanel.handleClick(sx, sy);
+        }
+    }
+
+    @Override
+    public void handleMouseMove(int sx, int sy) {
+        if (sx < x || sx >= x + width) return;
+        topTabBar   .handleMouseMove(sx, sy);
+        bottomTabBar.handleMouseMove(sx, sy);
+        if (sy >= CONTENT_Y && sy < BOTTOM_BAR_Y) {
+            contentPanel.handleMouseMove(sx, sy);
+        }
+    }
+
+    /** Overload accepting panelX for backwards-compatible call sites. panelX is unused. */
+    public void handleMouseMove(int sx, int sy, int panelX) {
+        syncPanelX(panelX);
+        handleMouseMove(sx, sy);
+    }
+
+    // -----------------------------------------------------------------------
+    //  Public API — tab management
+    // -----------------------------------------------------------------------
 
     public TabType getActiveTab() {
-        return tabManager.getActiveTab();
+        return tabManager.getActiveTabType();
     }
 
     public boolean hasActiveTab() {
@@ -178,226 +213,175 @@ public class RightPanel {
         tabManager.clearTab();
     }
 
-    public void openTab(TabType tab) {
-        tabManager.setTab(tab);
-        if (tab == TabType.SKILLS) {
-            skillsTab.resetScroll();
-        }
+    public void openTab(TabType type) {
+        Tab tab = tabManager.findByType(type);
+        if (tab != null) tabManager.setTab(tab);
+        if (type == TabType.SKILLS) skillsTab.resetScroll();
     }
 
-    public void toggleTab(TabType tab) {
-        tabManager.toggleTab(tab);
-        if (tabManager.getActiveTab() == TabType.SKILLS) {
-            skillsTab.resetScroll();
+    public void toggleTab(TabType type) {
+        Tab tab = tabManager.findByType(type);
+        if (tab != null) tabManager.toggleTab(tab);
+        if (tabManager.getActiveTabType() == TabType.SKILLS) skillsTab.resetScroll();
+    }
+
+    public void onTabSelected(TabType type) {
+        if (type == TabType.SKILLS) skillsTab.resetScroll();
+    }
+
+    // -----------------------------------------------------------------------
+    //  Public API — input routing
+    // -----------------------------------------------------------------------
+
+    /** Returns the click bounds of a tab slot by absolute index across all tabs. */
+    public Rectangle getTabBounds(int index, int panelX) {
+        syncPanelX(panelX);
+        if (index < TOP_TAB_COUNT) {
+            return topTabBar.getTabBounds(index);
+        } else {
+            return bottomTabBar.getTabBounds(index - TOP_TAB_COUNT);
         }
     }
 
     public int getHoveredTabIndex() {
-        return hoveredTabIndex;
+        int hi = topTabBar.getHoveredIndex();
+        if (hi >= 0) return hi;
+        int bi = bottomTabBar.getHoveredIndex();
+        if (bi >= 0) return TOP_TAB_COUNT + bi;
+        return -1;
     }
 
     public void setHoveredTabIndex(int hoveredTabIndex) {
-        this.hoveredTabIndex = hoveredTabIndex;
-    }
-
-    public void onTabSelected(TabType tab) {
-        if (tab == TabType.SKILLS) {
-            skillsTab.resetScroll();
+        if (hoveredTabIndex < 0) {
+            topTabBar   .setHoveredIndex(-1);
+            bottomTabBar.setHoveredIndex(-1);
+        } else if (hoveredTabIndex < TOP_TAB_COUNT) {
+            topTabBar   .setHoveredIndex(hoveredTabIndex);
+            bottomTabBar.setHoveredIndex(-1);
+        } else {
+            topTabBar   .setHoveredIndex(-1);
+            bottomTabBar.setHoveredIndex(hoveredTabIndex - TOP_TAB_COUNT);
         }
     }
 
-    /**
-     * Called by GameInputHandler for content-area clicks (below the tab bar).
-     * Returns true if the click was consumed.
-     */
-    public boolean handleClick(int sx, int sy, int panelX) {
-        int px = panelX;
-        int pw = Constants.PANEL_W;
-        if (sx < px || sx >= px + pw) return false;
-        if (!tabManager.hasActiveTab()) return false;
-
-        tabHandlers.get(tabManager.getActiveTab()).handleClick(sx, sy, px, pw);
-        return true;
-    }
-
-    /**
-     * Update hover state for the inventory grid.
-     */
-    public void handleMouseMove(int sx, int sy, int panelX) {
-        if (tabManager.getActiveTab() == TabType.INVENTORY) {
-            inventoryTab.handleMouseMove(sx, sy, panelX);
-        }
-    }
-
-    /**
-     * Scroll the Skills tab up (direction = -1) or down (direction = +1).
-     */
     public void handleMouseWheel(int direction) {
-        if (tabManager.getActiveTab() == TabType.SKILLS) {
-            skillsTab.handleMouseWheel(direction);
-        }
+        contentPanel.handleMouseWheel(direction);
     }
 
-    /**
-     * Returns the itemId of the inventory slot at the given screen position,
-     * or -1 if no slot is there.
-     */
+    public String getHoveredButtonLabel(int sx, int sy, int panelX) {
+        syncPanelX(panelX);
+        if (sx < x || sx >= x + width) return null;
+        return contentPanel.getHoveredLabel(sx, sy);
+    }
+
     public int getClickedInventoryItemId(int sx, int sy, Player player, int panelX) {
+        syncPanelX(panelX);
         return inventoryTab.getClickedItemId(sx, sy, player, panelX);
     }
 
     public String getHoveredInventoryItemName(Player player) {
-        if (tabManager.getActiveTab() != TabType.INVENTORY) {
-            return null;
-        }
+        if (tabManager.getActiveTabType() != TabType.INVENTORY) return null;
         return inventoryTab.getHoveredItemName(player);
     }
 
-    public String getHoveredButtonLabel(int sx, int sy, int panelX) {
-        int px = panelX;
-        int pw = Constants.PANEL_W;
-        if (sx < px || sx >= px + pw) return null;
-
-        return switch (tabManager.getActiveTab()) {
-            case COMBAT -> combatTab.getHoveredButtonLabel(sx, sy, px, pw);
-            case EQUIPMENT -> equipmentTab.getHoveredButtonLabel(sx, sy);
-            case SETTINGS -> settingsTab.getHoveredButtonLabel(sy);
-            case KEYBINDINGS -> keybindingsTab.getHoveredButtonLabel(sx, sy);
-            default -> null;
-        };
+    public boolean isInsideSettingsPanel(int sx, int sy) {
+        return tabManager.getActiveTabType() == TabType.SETTINGS
+                && settingsTab.containsPoint(sx, sy);
     }
 
     // -----------------------------------------------------------------------
-    //  Rendering entry point
+    //  Public API — configuration delegates
     // -----------------------------------------------------------------------
 
-    public void render(Graphics2D g, int panelX, int panelH, Player player,
-                       boolean shopOpen,
-                       Map<Integer, Integer> sellPrices,
-                       boolean isChopping, boolean isMining,
-                       boolean isInCombat, String combatTarget) {
-        int px = panelX;
-        int pw = Constants.PANEL_W;
-
-        // Panel background
-        g.setColor(new Color(20, 16, 12));
-        g.fillRect(px, 0, pw, panelH);
-
-        // Inner bevelled border
-        g.setColor(new Color(65, 52, 30));
-        g.drawLine(px + 2, 2, px + pw - 3, 2);
-        g.drawLine(px + 2, 2, px + 2, panelH - 3);
-        g.setColor(new Color(30, 24, 14));
-        g.drawLine(px + pw - 3, 2, px + pw - 3, panelH - 3);
-
-        drawStatsSection(g, px, pw, player, isChopping, isMining, isInCombat, combatTarget);
-        GameRenderer.drawTabBar(g, this, px);
-        drawContentDivider(g, px, pw);
-
-        switch (tabManager.getActiveTab()) {
-            case NONE:      break;
-            case COMBAT:    combatTab   .render(g, px, pw);                       break;
-            case INVENTORY: inventoryTab.render(g, px, player, shopOpen, sellPrices); break;
-            case SKILLS:    skillsTab   .render(g, player, px, pw);               break;
-            case EQUIPMENT: equipmentTab.render(g, player, px, pw);               break;
-            case QUESTS:    questTab    .render(g, px, pw);                       break;
-            case SETTINGS:  settingsTab .render(g, px, pw);                       break;
-            case KEYBINDINGS: keybindingsTab.render(g, px, pw);                   break;
-        }
-
-        drawFooter(g, px, pw);
+    public void setQuestEntries(List<QuestEntry> entries) {
+        questTab.setQuestEntries(entries);
     }
 
+    public void setCombatStyleListener(Consumer<String> listener) {
+        combatTab.setCombatStyleListener(listener);
+    }
+
+    public void setAutoRetaliateListener(Consumer<Boolean> listener) {
+        combatTab.setAutoRetaliateListener(listener);
+    }
+
+    public void setUnequipListener(Consumer<String> listener) {
+        equipmentTab.setUnequipListener(listener);
+    }
+
+    public void setFullscreenListener(Runnable listener)    { settingsTab.setFullscreenListener(listener); }
+    public void setResizableListener(Runnable listener)     { settingsTab.setResizableListener(listener); }
+    public void setFpsListener(Runnable listener)           { settingsTab.setFpsListener(listener); }
+    public void setPingListener(Runnable listener)          { settingsTab.setPingListener(listener); }
+    public void setTotalXpListener(Runnable listener)       { settingsTab.setTotalXpListener(listener); }
+    public void setKeybindingsListener(Runnable listener)   { settingsTab.setKeybindingsListener(listener); }
+    public void setShiftDropListener(Runnable listener)     { settingsTab.setShiftDropListener(listener); }
+    public void setMinimapListener(Runnable listener)       { settingsTab.setMinimapListener(listener); }
+    public void setDirectionListener(Runnable listener)     { settingsTab.setDirectionListener(listener); }
+    public void setKeybindingRebindListener(Consumer<ClientSettings.Action> listener) {
+        keybindingsTab.setRebindListener(listener);
+    }
+    public void setPrayerToggleListener(Consumer<String> listener) {
+        prayerTab.setPrayerToggleListener(listener);
+    }
+    public void setLogoutListener(Runnable listener) {
+        logoutTab.setLogoutListener(listener);
+    }
+
+    public void tickLogout(double deltaTime)    { logoutTab.tick(deltaTime); }
+    public void resetLogoutConfirm()            { logoutTab.resetConfirm(); }
+
+    public void setListeningKeybindingAction(ClientSettings.Action action) {
+        keybindingsTab.setListeningAction(action);
+    }
+
+    public void setFullscreen(boolean fullscreen)  { settingsTab.setFullscreen(fullscreen); }
+    public void setResizable(boolean resizable)    { settingsTab.setResizable(resizable); }
+    public void setShowFps(boolean showFps)        { settingsTab.setShowFps(showFps); }
+    public void setShowPing(boolean showPing)      { settingsTab.setShowPing(showPing); }
+
     // -----------------------------------------------------------------------
-    //  Stats section  (Y 0–82)
+    //  Private helpers
     // -----------------------------------------------------------------------
 
-    private void drawStatsSection(Graphics2D g, int px, int pw, Player player,
-                                   boolean isChopping, boolean isMining,
-                                   boolean isInCombat, String combatTarget) {
-        int bx = px + 8;
-        int bw = pw - 16;
+    /**
+     * Paints the active top-tab's fill color over the gap between the tab bar bottom
+     * and the content panel top, erasing the visible seam from the inventory_box sprite.
+     * When no top tab is active nothing is drawn, leaving the background visible.
+     */
+    private void drawActiveTabConnection(Graphics2D g) {
+        TabType activeType = tabManager.getActiveTabType();
+        if (activeType == null) return;
+        Rectangle slot = topTabBar.getActiveSlotBounds(activeType);
+        if (slot == null) return;   // active tab is in the bottom bar — no connection needed
+        // Fill from 1px above the bar bottom to 1px into the content area,
+        // erasing the inventory_box texture that would otherwise show as a seam.
+        int fillY = TAB_BAR_HEIGHT - 1;
+        int fillH = CONTENT_PADDING + 2;
+        g.setColor(TabBar.ACTIVE_SLOT_COLOR);
+        g.fillRect(slot.x + 1, fillY, slot.width - 2, fillH);
+        // Gold rule continues down from the tab highlight, reinforcing the join
+        g.setColor(new Color(130, 104, 52, 80));
+        g.drawLine(slot.x + 1, TAB_BAR_HEIGHT, slot.x + slot.width - 2, TAB_BAR_HEIGHT);
+    }
 
-        g.setFont(new Font("Arial", Font.BOLD, 11));
-        drawOutlined(g, "STATS", px + pw / 2 - 18, 15,
-                new Color(220, 200, 120), new Color(0, 0, 0, 180));
-
-        float hpFrac  = (float) player.getHp() / player.getMaxHp();
-        Color hpColor = hpFrac > 0.5f  ? new Color( 55, 175,  55)
-                      : hpFrac > 0.25f ? new Color(215, 145,  25)
-                      :                   new Color(195,  35,  35);
-
-        g.setFont(new Font("Arial", Font.PLAIN, 11));
-        g.setColor(new Color(200, 200, 200));
-        g.drawString("HP:  " + player.getHp() + " / " + player.getMaxHp(), bx, 33);
-
-        g.setColor(new Color(40, 0, 0));
-        g.fillRect(bx, 37, bw, 9);
-        g.setColor(hpColor);
-        g.fillRect(bx, 37, (int)(bw * hpFrac), 9);
-        g.setColor(new Color(70, 70, 70));
-        g.drawRect(bx, 37, bw, 9);
-
-        g.setFont(new Font("Arial", Font.PLAIN, 10));
-        String status;
-        Color  statusColor;
-        if (isInCombat && combatTarget != null) {
-            status      = "Fighting: " + combatTarget;
-            statusColor = new Color(220, 95, 95);
-        } else if (isChopping) {
-            status      = "Chopping tree...";
-            statusColor = new Color(180, 205, 100);
-        } else if (isMining) {
-            status      = "Mining rock...";
-            statusColor = new Color(130, 155, 220);
+    private void drawPanelBackground(Graphics2D g) {
+        BufferedImage bg = AssetManager.getImage("inventory_box");
+        if (bg == null) {
+            g.setColor(new Color(20, 16, 12));
+            g.fillRect(x, 0, width, Constants.SCREEN_HEIGHT);
         } else {
-            status      = "Idle";
-            statusColor = new Color(120, 120, 120);
+            g.drawImage(bg, x, 0, width, Constants.SCREEN_HEIGHT, null);
         }
-        g.setColor(statusColor);
-        g.drawString(status, bx, 62);
-
-        g.setColor(new Color(80, 65, 35));
-        g.drawLine(px + 4, STATS_H - 2, px + pw - 4, STATS_H - 2);
     }
 
-    private void drawContentDivider(Graphics2D g, int px, int pw) {
-        g.setColor(new Color(90, 72, 38));
-        g.drawLine(px + 3, CONTENT_Y, px + pw - 3, CONTENT_Y);
-        g.setColor(new Color(35, 28, 14));
-        g.drawLine(px + 3, CONTENT_Y + 1, px + pw - 3, CONTENT_Y + 1);
-    }
-
-    // -----------------------------------------------------------------------
-    //  Footer  (Y 520–600)
-    // -----------------------------------------------------------------------
-
-    private void drawFooter(Graphics2D g, int px, int pw) {
-        int bx = px + 8;
-
-        g.setColor(new Color(80, 65, 35));
-        g.drawLine(px + 3, FOOTER_Y, px + pw - 3, FOOTER_Y);
-        g.setColor(new Color(35, 28, 14));
-        g.drawLine(px + 3, FOOTER_Y + 1, px + pw - 3, FOOTER_Y + 1);
-
-        g.setFont(new Font("Arial", Font.PLAIN, 9));
-        g.setColor(new Color(95, 90, 65));
-        g.drawString("[Enter] Chat  [D]ebug  [M]ute", bx,
-                Math.max(FOOTER_Y + 14, Constants.SCREEN_HEIGHT - 8));
-    }
-
-    // -----------------------------------------------------------------------
-    //  Helper
-    // -----------------------------------------------------------------------
-
-    private static void drawOutlined(Graphics2D g, String text, int x, int y,
-                                      Color fg, Color shadow) {
-        g.setColor(shadow);
-        g.drawString(text, x + 1, y + 1);
-        g.drawString(text, x - 1, y + 1);
-        g.drawString(text, x + 1, y - 1);
-        g.drawString(text, x - 1, y - 1);
-        g.setColor(fg);
-        g.drawString(text, x, y);
+    void syncPanelX(int panelX) {
+        setBounds(panelX, 0, Constants.PANEL_W, height);
+        topTabBar.setBounds(panelX + CONTENT_PADDING, 0,
+                Constants.PANEL_W - CONTENT_PADDING * 2, TAB_BAR_HEIGHT);
+        contentPanel.setBounds(panelX + CONTENT_PADDING, CONTENT_Y + CONTENT_PADDING,
+                Constants.PANEL_W - CONTENT_PADDING * 2, CONTENT_H - CONTENT_PADDING * 2);
+        bottomTabBar.setBounds(panelX + CONTENT_PADDING, BOTTOM_BAR_Y,
+                Constants.PANEL_W - CONTENT_PADDING * 2, TAB_BAR_HEIGHT);
     }
 }

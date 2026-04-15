@@ -120,19 +120,10 @@ public class AttackSystem {
     }
 
     /**
-     * Converts the player's facingX / facingY into a direction string that
-     * matches metadata.json keys.  Mirrors {@code Player.getSpriteDirection()}.
+     * Returns the player's current 4-cardinal direction for attack animation lookup.
+     * Uses the server-authoritative direction string — no derivation from axes.
      */
     static String facingDirection(Player player) {
-        int fx = player.getFacingX();
-        int fy = player.getFacingY();
-        if (fx > 0 && fy < 0) return "north-east";
-        if (fx > 0 && fy > 0) return "south-east";
-        if (fx < 0 && fy < 0) return "north-west";
-        if (fx < 0 && fy > 0) return "south-west";
-        if (fx > 0)            return "east";
-        if (fx < 0)            return "west";
-        if (fy < 0)            return "north";
-        return "south";
+        return player.getDirection();
     }
 }

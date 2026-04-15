@@ -3,5 +3,6 @@
   "name": "Raw Lobster",
   "value": 40,
   "stackable": false,
-  "tradable": true
+  "tradable": true,
+  "spriteKey": "items/food/fish/raw_lobster"
 }

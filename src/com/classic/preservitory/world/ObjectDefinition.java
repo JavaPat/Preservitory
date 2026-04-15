@@ -12,17 +12,20 @@ public final class ObjectDefinition {
     public final int     width;
     public final int     height;
     public final boolean blocksMovement;
+    /** AssetManager sprite key for rendering this object, or {@code null} if none. */
+    public final String  spriteKey;
 
-    public ObjectDefinition(String id, int width, int height, boolean blocksMovement) {
+    public ObjectDefinition(String id, int width, int height, boolean blocksMovement, String spriteKey) {
         this.id             = id;
         this.width          = width;
         this.height         = height;
         this.blocksMovement = blocksMovement;
+        this.spriteKey      = spriteKey;
     }
 
     @Override
     public String toString() {
         return "ObjectDefinition{id='" + id + "', size=" + width + "x" + height
-                + ", blocksMovement=" + blocksMovement + '}';
+                + ", blocksMovement=" + blocksMovement + ", spriteKey='" + spriteKey + "'}";
     }
 }

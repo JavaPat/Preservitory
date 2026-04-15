@@ -27,7 +27,7 @@ public class MusicToggleButton extends UIComponent {
     public void render(Graphics2D g) {
         if (!visible) return;
 
-        String key = music.isEnabled() ? "mute" : "unmute";
+        String key = music.isEnabled() ? "login_screen/mute" : "login_screen/unmute";
         BufferedImage icon = AssetManager.getImage(key);
 
         if (icon != null) {

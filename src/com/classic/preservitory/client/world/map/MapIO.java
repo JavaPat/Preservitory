@@ -58,13 +58,27 @@ public class MapIO {
         int h = Integer.parseInt(json.replaceAll("[\\s\\S]*\"height\"\\s*:\\s*(\\d+)[\\s\\S]*", "$1"));
         TileMap tileMap = new TileMap(w, h);
         // Extract tiles array (stops at the first ']' after '[', skipping nested)
-        String tilesBlock = json.replaceAll("[\\s\\S]*\"tiles\"\\s*:\\s*\\[([\\s\\S]*?)\\]\\s*,?\\s*\"", "$1").trim();
+        Matcher tilesMatcher = Pattern.compile("\"tiles\"\\s*:\\s*\\[(.*?)]\\s*,\\s*\"objects\"", Pattern.DOTALL)
+                .matcher(json);
+
+        String tilesBlock = "";
+        if (tilesMatcher.find()) {
+            tilesBlock = tilesMatcher.group(1);
+        }
         Matcher rowMatcher = Pattern.compile("\\[([^\\]]+)\\]").matcher(tilesBlock);
         int x = 0;
         while (rowMatcher.find() && x < w) {
             String[] vals = rowMatcher.group(1).trim().split("\\s*,\\s*");
             for (int y = 0; y < vals.length && y < h; y++) {
-                tileMap.setTile(x, y, Integer.parseInt(vals[y].trim()));
+                String val = vals[y].trim();
+
+                if (val.isEmpty()) continue; // 🔥 prevents crash
+
+                try {
+                    tileMap.setTile(x, y, Integer.parseInt(val));
+                } catch (NumberFormatException e) {
+                    System.out.println("Bad tile value at x=" + x + " y=" + y + ": '" + val + "'");
+                }
             }
             x++;
         }
@@ -86,7 +100,7 @@ public class MapIO {
             String key      = extractString(entry, "key");
             int    tileX    = extractInt(entry, "tileX");
             int    tileY    = extractInt(entry, "tileY");
-            int    rotation = extractInt(entry, "rotation");
+            int    rotation = ((extractInt(entry, "rotation") / 90) % 4) * 90;
             if (key != null) result.add(new EditorObject(key, tileX, tileY, rotation));
         }
         return result;

@@ -89,7 +89,9 @@ public class Tree extends Entity {
         int footY = isoY + IsoUtils.ISO_TILE_H;
 
         if (state == State.ALIVE) {
-            BufferedImage sprite = AssetManager.getImage(typeId);
+            ObjectDefinition def = DEFINITIONS.get(typeId);
+            String spriteKey = (def != null && def.spriteKey != null) ? def.spriteKey : typeId;
+            BufferedImage sprite = AssetManager.getImage(spriteKey);
             if (sprite != null) {
                 g.drawImage(sprite, footX - sprite.getWidth() / 2, footY - sprite.getHeight() + 16, null);
             } else {

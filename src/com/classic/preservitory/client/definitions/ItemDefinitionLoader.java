@@ -25,6 +25,9 @@ public final class ItemDefinitionLoader {
     private static final Pattern EQUIP_SLOT_PATTERN = Pattern.compile("\"equipSlot\"\\s*:\\s*\"([^\"]+)\"");
     private static final Pattern ATTACK_BONUS_PAT   = Pattern.compile("\"attackBonus\"\\s*:\\s*(-?\\d+)");
     private static final Pattern STR_BONUS_PAT      = Pattern.compile("\"strengthBonus\"\\s*:\\s*(-?\\d+)");
+    private static final Pattern DEF_BONUS_PAT      = Pattern.compile("\"defenceBonus\"\\s*:\\s*(-?\\d+)");
+    private static final Pattern SPRITE_KEY_PATTERN = Pattern.compile("\"spriteKey\"\\s*:\\s*\"([^\"]+)\"");
+    private static final Pattern BURYABLE_PATTERN   = Pattern.compile("\"buryable\"\\s*:\\s*(true|false)");
 
     private ItemDefinitionLoader() {}
 
@@ -61,7 +64,10 @@ public final class ItemDefinitionLoader {
             String  equipSlot     = match(json, EQUIP_SLOT_PATTERN);
             int     attackBonus   = parseInt(match(json, ATTACK_BONUS_PAT), 0);
             int     strengthBonus = parseInt(match(json, STR_BONUS_PAT), 0);
-            return new ItemDefinition(id, name, value, stackable, tradable, equipSlot, attackBonus, strengthBonus);
+            int     defenceBonus  = parseInt(match(json, DEF_BONUS_PAT), 0);
+            String  spriteKey     = match(json, SPRITE_KEY_PATTERN);
+            boolean buryable      = "true".equals(match(json, BURYABLE_PATTERN));
+            return new ItemDefinition(id, name, value, stackable, tradable, equipSlot, attackBonus, strengthBonus, defenceBonus, spriteKey, buryable);
         } catch (NumberFormatException e) {
             return null;
         }

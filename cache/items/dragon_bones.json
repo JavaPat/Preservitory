@@ -1,0 +1,9 @@
+{
+  "id": 402,
+  "name": "Dragon Bones",
+  "value": 30,
+  "stackable": false,
+  "tradable": true,
+  "buryable": true,
+  "spriteKey": "items/prayer/dragon_bones"
+}
